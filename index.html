@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeStream</title>
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Clean Splash Screen -->
+    <div id="splash-screen" class="splash-screen">
+        <div class="splash-content">
+            <div class="splash-logo">
+                <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <polyline class="logo-path logo-path-dark" points="60 20, 20 20, 20 80, 60 80"
+                              stroke="#ffffff" stroke-width="12" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+                    <polyline class="logo-path logo-path-cyan" points="80 20, 45 20, 45 50, 80 50, 80 80, 45 80"
+                              stroke="#00d4ff" stroke-width="12" fill="none" stroke-linecap="square" stroke-linejoin="miter"/>
+                </svg>
+            </div>
+            <h1 class="splash-title"><span class="title-code">Code</span><span class="title-stream">Stream</span></h1>
+        </div>
+    </div>
+
+    <div class="container" id="main-container" style="opacity: 0;">
+        <div class="left-panel">
+            <div class="editor-wrapper">
+                <div class="line-numbers" id="input-line-numbers">1</div>
+                <div class="input-code-wrapper">
+                    <pre class="input-highlight" id="input-highlight"><code class="language-html"></code></pre>
+                    <textarea id="input-code" placeholder="Paste HTML code here..." spellcheck="false"></textarea>
+                </div>
+            </div>
+            <div id="error-display" class="error-display hidden"></div>
+
+            <div class="controls-row">
+                <button id="play-btn" type="button">PLAY</button>
+                <button id="reset-btn" type="button">PAUSE</button>
+            </div>
+
+            <div class="slider-group">
+                <label>Typing Speed</label>
+                <input type="range" id="speed" min="0" max="100" value="70">
+                <div class="speed-labels">
+                    <span id="speed-label" class="speed-percent">70%</span>
+                    <span id="speed-ms" class="speed-ms">30 char/sec</span>
+                </div>
+            </div>
+
+            <div class="slider-group">
+                <label>Preview Scale</label>
+                <input type="range" id="preview-scale" min="0" max="100" value="0">
+            </div>
+
+            <div class="progress-display">
+                <span id="progress-value">0/0 chars (0.0%)</span>
+            </div>
+
+            <div class="shortcuts-help">
+                <div class="shortcuts-title">Shortcuts</div>
+                <div class="shortcut-item"><span class="key">Ctrl+Enter</span> Play</div>
+                <div class="shortcut-item"><span class="key">Ctrl+Space</span> Toggle Editor</div>
+                <div class="shortcut-item"><span class="key">Ctrl+S</span> Save</div>
+                <div class="shortcut-item"><span class="key">Ctrl+O</span> Load</div>
+                <div class="shortcut-item"><span class="key">Esc</span> Stop</div>
+            </div>
+        </div>
+
+        <!-- Resizer divider -->
+        <div class="resizer" id="resizer">
+            <div class="resizer-handle"></div>
+        </div>
+
+        <!-- Panel toggle button -->
+        <button class="panel-toggle" id="panel-toggle" title="Hide Editor"><span class="toggle-icon">◀</span></button>
+
+        <div class="right-panel" id="right-panel">
+            <div class="code-display-wrapper">
+                <div class="line-numbers" id="output-line-numbers">1</div>
+                <div class="code-display">
+                    <pre><code id="typed-code" class="language-html"></code></pre>
+                </div>
+            </div>
+            <div class="preview-container" id="preview-wrapper">
+                <div class="preview-scaler" id="preview-scaler">
+                    <iframe id="preview" sandbox="allow-scripts"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-html.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,632 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Consolas', 'Monaco', 'Fira Code', monospace;
+    background: #0d1117;
+    height: 100vh;
+    overflow: hidden;
+    color: #c9d1d9;
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* ============================================
+   SPLASH SCREEN - Clean & Simple
+   ============================================ */
+
+.splash-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #0d1117;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100000;
+    transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
+}
+
+.splash-screen.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.splash-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    animation: splashFadeIn 0.6s ease-out;
+}
+
+@keyframes splashFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.splash-logo svg {
+    display: block;
+}
+
+.logo-path {
+    stroke-dasharray: 300;
+    stroke-dashoffset: 300;
+    animation: drawPath 1.2s ease-out forwards;
+}
+
+.logo-path-dark {
+    animation-delay: 0s;
+}
+
+.logo-path-cyan {
+    animation-delay: 0.4s;
+}
+
+@keyframes drawPath {
+    to {
+        stroke-dashoffset: 0;
+    }
+}
+
+.splash-title {
+    font-family: 'Consolas', 'Monaco', 'Fira Code', monospace;
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: 2px;
+    opacity: 0;
+    animation: titleFadeIn 0.5s ease-out 1s forwards;
+}
+
+.title-code {
+    color: #ffffff;
+}
+
+.title-stream {
+    color: #00d4ff;
+}
+
+@keyframes titleFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* ============================================
+   MAIN UI - Clean Dark Theme
+   ============================================ */
+
+/* Resizer */
+.resizer {
+    width: 8px;
+    background: #21262d;
+    cursor: ew-resize;
+    position: relative;
+    z-index: 100;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+
+.resizer:hover,
+.resizer.resizing {
+    background: #00d4ff;
+}
+
+.resizer::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 30px;
+    background: #484f58;
+    border-radius: 1px;
+    pointer-events: none;
+}
+
+.resizer:hover::after,
+.resizer.resizing::after {
+    background: #00d4ff;
+}
+
+.resizer-handle {
+    pointer-events: none;
+}
+
+/* Left Panel */
+.left-panel {
+    width: 300px;
+    min-width: 300px;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    background: #161b22;
+    border-right: 1px solid #21262d;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.left-panel.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    opacity: 0;
+    overflow: hidden;
+    border-right: none;
+}
+
+/* Panel Toggle */
+.panel-toggle {
+    position: fixed;
+    left: 300px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 14px;
+    height: 50px;
+    background: #21262d;
+    border: none;
+    border-radius: 0 4px 4px 0;
+    cursor: pointer;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, opacity 0.2s ease, left 0.3s ease;
+    padding: 0;
+    margin: 0;
+    opacity: 0;
+}
+
+.resizer:hover ~ .panel-toggle,
+.panel-toggle:hover {
+    opacity: 1;
+    background: #00d4ff;
+}
+
+.panel-toggle .toggle-icon {
+    color: #c9d1d9;
+    font-size: 10px;
+    transition: transform 0.3s ease;
+    pointer-events: none;
+}
+
+body.panel-collapsed .panel-toggle {
+    left: 0 !important;
+    width: 16px;
+    height: 60px;
+    background: #21262d;
+}
+
+body.panel-collapsed .panel-toggle:hover {
+    opacity: 1;
+    background: #00d4ff;
+}
+
+body.panel-collapsed .panel-toggle .toggle-icon {
+    transform: rotate(180deg);
+}
+
+.container.has-collapsed-panel .resizer {
+    display: none;
+}
+
+/* Editor */
+.editor-wrapper {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+}
+
+.line-numbers {
+    background: #0d1117;
+    color: #484f58;
+    padding: 12px 10px 12px 15px;
+    font-size: 13px;
+    line-height: 1.6;
+    text-align: right;
+    user-select: none;
+    border-right: 1px solid #21262d;
+    min-width: 50px;
+    overflow: hidden;
+    white-space: pre;
+}
+
+.input-code-wrapper {
+    flex: 1;
+    position: relative;
+    overflow: auto;
+}
+
+#input-code {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    color: transparent;
+    caret-color: #00d4ff;
+    border: none;
+    padding: 12px;
+    font-family: 'Consolas', 'Monaco', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 4;
+    z-index: 2;
+}
+
+#input-code::placeholder {
+    color: transparent;
+}
+
+.input-highlight {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 12px;
+    font-family: 'Consolas', 'Monaco', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+    overflow: auto;
+    background: #161b22;
+    color: #c9d1d9;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.input-highlight code:empty::after {
+    content: 'Paste HTML code here...';
+    color: #484f58;
+}
+
+.input-highlight code {
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+}
+
+/* Error Display */
+.error-display {
+    background: #3d1111;
+    color: #ff7b72;
+    padding: 10px 15px;
+    font-size: 12px;
+    border-top: 1px solid #21262d;
+    border-bottom: 1px solid #21262d;
+}
+
+.error-display.hidden {
+    display: none;
+}
+
+/* Controls */
+.controls-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 15px;
+    border-top: 1px solid #21262d;
+    background: #0d1117;
+}
+
+button {
+    flex: 1;
+    height: 34px;
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+}
+
+button:hover {
+    background: #30363d;
+    border-color: #00d4ff;
+}
+
+#play-btn {
+    background: #238636;
+    border-color: #238636;
+    color: #fff;
+}
+
+#play-btn:hover {
+    background: #2ea043;
+    border-color: #2ea043;
+}
+
+#reset-btn {
+    background: #da3633;
+    border-color: #da3633;
+    color: #fff;
+}
+
+#reset-btn:hover {
+    background: #f85149;
+    border-color: #f85149;
+}
+
+/* Sliders */
+.slider-group {
+    padding: 10px 15px;
+    border-top: 1px solid #21262d;
+}
+
+.slider-group label {
+    display: block;
+    color: #8b949e;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.slider-group input[type="range"] {
+    width: 100%;
+    -webkit-appearance: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.slider-group input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    background: #30363d;
+    border-radius: 2px;
+}
+
+.slider-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: #00d4ff;
+    border-radius: 50%;
+    margin-top: -5px;
+    transition: transform 0.1s;
+}
+
+.slider-group input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.speed-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 11px;
+}
+
+.speed-percent {
+    color: #8b949e;
+}
+
+.speed-ms {
+    color: #00d4ff;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+/* Progress Display */
+.progress-display {
+    padding: 10px 15px;
+    background: #0d1117;
+    border-top: 1px solid #21262d;
+    text-align: center;
+}
+
+#progress-value {
+    color: #00d4ff;
+    font-size: 11px;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+/* Shortcuts Help */
+.shortcuts-help {
+    padding: 12px 15px;
+    background: #0d1117;
+    border-top: 1px solid #21262d;
+    font-size: 11px;
+    color: #8b949e;
+}
+
+.shortcuts-title {
+    font-weight: 500;
+    color: #c9d1d9;
+    margin-bottom: 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.shortcut-item {
+    margin: 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.shortcut-item .key {
+    background: #21262d;
+    color: #c9d1d9;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 10px;
+    border: 1px solid #30363d;
+    min-width: 80px;
+    text-align: center;
+}
+
+/* Right Panel */
+.right-panel {
+    flex: 1;
+    min-width: 300px;
+    display: flex;
+    flex-direction: column;
+    background: #0d1117;
+}
+
+.code-display-wrapper {
+    height: 45%;
+    display: flex;
+    border-bottom: 1px solid #21262d;
+    overflow: hidden;
+}
+
+.code-display {
+    flex: 1;
+    overflow: auto;
+    background: #161b22;
+    padding: 12px;
+}
+
+.code-display pre {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+}
+
+.code-display code {
+    font-family: 'Consolas', 'Monaco', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    background: transparent !important;
+}
+
+/* Preview */
+.preview-container {
+    height: 55%;
+    background: #0d1117;
+    overflow: auto;
+    position: relative;
+    cursor: grab;
+}
+
+.preview-container:active {
+    cursor: grabbing;
+}
+
+.preview-scaler {
+    width: 1920px;
+    height: 1080px;
+    min-width: 1920px;
+    min-height: 1080px;
+    position: relative;
+    transform-origin: 0 0;
+}
+
+#preview {
+    width: 1920px;
+    height: 1080px;
+    border: none;
+    background: #fff;
+    display: block;
+    transform-origin: top left;
+}
+
+/* Syntax Highlighting - GitHub Dark Colors */
+.token.comment,
+.token.prolog,
+.token.doctype {
+    color: #8b949e;
+}
+
+.token.tag {
+    color: #7ee787;
+}
+
+.token.attr-name {
+    color: #79c0ff;
+}
+
+.token.attr-value,
+.token.string {
+    color: #a5d6ff;
+}
+
+.token.punctuation {
+    color: #c9d1d9;
+}
+
+.token.selector {
+    color: #d2a8ff;
+}
+
+.token.property {
+    color: #79c0ff;
+}
+
+.token.number,
+.token.unit {
+    color: #79c0ff;
+}
+
+.token.keyword {
+    color: #ff7b72;
+}
+
+.token.function {
+    color: #d2a8ff;
+}
+
+.token.operator {
+    color: #c9d1d9;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0d1117;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #30363d;
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #00d4ff;
+}
+
+/* Main container transition */
+#main-container {
+    transition: opacity 0.5s ease-out;
+}
+
+#main-container.visible {
+    opacity: 1 !important;
+}
