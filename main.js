@@ -51,8 +51,6 @@ class LiveCodingApp {
         // Initialize splash screen
         this.initSplashScreen();
 
-        this.playBtn = document.getElementById('play-btn');
-        this.pauseBtn = document.getElementById('reset-btn');
         this.speedSlider = document.getElementById('speed');
         this.previewScaleSlider = document.getElementById('preview-scale');
         this.progressValue = document.getElementById('progress-value');
@@ -65,9 +63,6 @@ class LiveCodingApp {
         this.errorDisplay = document.getElementById('error-display');
         this.inputLineNumbers = document.getElementById('input-line-numbers');
         this.outputLineNumbers = document.getElementById('output-line-numbers');
-
-        this.playBtn.addEventListener('click', (e) => { e.preventDefault(); this.handlePlayClick(); });
-        this.pauseBtn.addEventListener('click', (e) => { e.preventDefault(); this.handlePauseClick(); });
 
         // Speed slider - linear from 200ms to 0.5ms
         // Update display and typing speed
@@ -807,10 +802,6 @@ ${data.body}
         this.typedContent = '';
         this.typedCode.innerHTML = '';
         this.preview.srcdoc = '';
-        this.playBtn.innerHTML = 'PLAY';
-        this.playBtn.style.background = '#22c55e'; // Green
-        this.pauseBtn.innerHTML = 'PAUSE';
-        this.pauseBtn.style.background = '#dc2626'; // Red
         this.currentChars = 0;
         this.totalChars = 0;
         this.progressValue.textContent = '0/0 chars (0.0%)';
@@ -831,10 +822,6 @@ ${data.body}
         this.typedContent = '';
         this.typedCode.innerHTML = '';
         this.preview.srcdoc = '';
-        this.playBtn.innerHTML = 'PLAY';
-        this.playBtn.style.background = '#22c55e'; // Green
-        this.pauseBtn.innerHTML = 'PAUSE';
-        this.pauseBtn.style.background = '#dc2626'; // Red
         this.currentChars = 0;
         this.totalChars = 0;
         this.progressValue.textContent = '0/0 chars (0.0%)';
@@ -860,17 +847,9 @@ ${data.body}
         if (this.isPaused) {
             // Resume typing
             this.isPaused = false;
-            this.pauseBtn.innerHTML = 'PAUSE';
-            this.pauseBtn.style.background = '#dc2626'; // Red
-            this.playBtn.innerHTML = 'STOP';
-            this.playBtn.style.background = '#dc2626'; // Red
         } else {
             // Pause - allow editing
             this.isPaused = true;
-            this.pauseBtn.innerHTML = 'RESUME';
-            this.pauseBtn.style.background = '#22c55e'; // Green
-            this.playBtn.innerHTML = 'STOP';
-            this.playBtn.style.background = '#dc2626'; // Red
         }
     }
 
@@ -913,10 +892,6 @@ ${data.body}
         this.isTyping = true;
         this.isPaused = false;
         this.resetScrollDetection(); // Reset scroll detection
-        this.playBtn.innerHTML = 'STOP';
-        this.playBtn.style.background = '#dc2626'; // Red
-        this.pauseBtn.innerHTML = 'PAUSE';
-        this.pauseBtn.style.background = '#dc2626'; // Red
         this.typedContent = '';
         this.typedCode.innerHTML = '';
 
@@ -989,11 +964,6 @@ ${data.body}
         this.updateTypedCodeDisplay();
         this.updatePreview();
 
-        // Reset buttons to initial state when done
-        this.playBtn.innerHTML = 'PLAY';
-        this.playBtn.style.background = '#22c55e';
-        this.pauseBtn.innerHTML = 'PAUSE';
-        this.pauseBtn.style.background = '#dc2626';
     }
 
     // Type a line with natural cursor movement
@@ -1189,10 +1159,6 @@ ${data.body}
         this.parsedData = { title: '', style: '', body: '', hasErrors: false, errors: [] };
         this.updateInputLineNumbers();
         this.outputLineNumbers.textContent = '1';
-        this.playBtn.innerHTML = 'PLAY';
-        this.playBtn.style.background = '#22c55e'; // Green
-        this.pauseBtn.innerHTML = 'PAUSE';
-        this.pauseBtn.style.background = '#dc2626'; // Red
         this.currentChars = 0;
         this.totalChars = 0;
         this.progressValue.textContent = '0/0 chars (0.0%)';
