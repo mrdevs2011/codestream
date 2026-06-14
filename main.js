@@ -183,6 +183,10 @@ class LiveCodingApp {
                 this.parseInputCode();
                 this.showToast(`Loaded Room #${codeId} (${data.title || 'Untitled'})`, 'success');
                 console.log('Code loaded from Room:', codeId);
+
+                // 🎬 AUTO PLAY MODE: URL orqali kirgan foydalanuvchilar uchun
+                console.log('🎬 Starting auto-play mode...');
+                this.startAutoPlay();
             } else {
                 this.showToast(`Room #${codeId} not found!`, 'error');
             }
@@ -190,6 +194,34 @@ class LiveCodingApp {
             console.error('Error loading from Firebase:', error);
             this.showToast('Failed to load code', 'error');
         }
+    }
+
+    // Auto-play mode for URL visitors (no user interaction needed)
+    async startAutoPlay() {
+        console.log('🚀 Auto-play: Setting speed to INSTANT (0ms)...');
+
+        // 1. Set speed to INSTANT (0ms delay)
+        this.typingSpeed = 0; // 0ms = instant typing
+        this.speedSlider.value = 100;
+        this.updateSpeedDisplay(100);
+
+        // Wait for UI to update
+        await this.sleep(100);
+
+        // 2. Hide panel (like Ctrl+Space)
+        console.log('🚀 Auto-play: Hiding panel...');
+        if (this.leftPanel && !this.leftPanel.classList.contains('collapsed')) {
+            this.togglePanel();
+        }
+
+        // Wait for animation
+        await this.sleep(300);
+
+        // 3. Start typing (like Ctrl+Enter)
+        console.log('🚀 Auto-play: Starting instant typing...');
+        this.handlePlayClick();
+
+        console.log('✅ Auto-play mode activated! Speed: 0ms');
     }
 
     // Save code to Firebase with auto-increment room ID
@@ -1187,8 +1219,29 @@ ${data.body}
 
     // Type a line with natural cursor movement
     async typeLineWithCursor(text) {
-        console.log('typeLineWithCursor called, text length:', text.length, 'isTyping:', this.isTyping);
+        console.log('typeLineWithCursor called, text length:', text.length, 'isTyping:', this.isTyping, 'speed:', this.typingSpeed);
 
+        // INSTANT MODE: If speed is 0, type everything at once
+        if (this.typingSpeed === 0) {
+            console.log('⚡ INSTANT MODE: Typing all at once');
+            for (const char of text) {
+                if (!this.isTyping) return;
+                this.typedContent += char;
+                if (!/\s/.test(char)) {
+                    this.currentChars++;
+                }
+            }
+            this.typedContent += '\n';
+            this.updateTypedCodeDisplay();
+            this.updateOutputLineNumbers();
+            this.autoScroll();
+            this.updatePreview();
+            this.updateProgressBar();
+            console.log('⚡ INSTANT MODE: Line complete');
+            return;
+        }
+
+        // NORMAL MODE: Character by character with delay
         for (const char of text) {
             // Wait if paused
             while (this.isPaused) {
@@ -1262,7 +1315,32 @@ ${data.body}
             }
         }
 
-        // Type content line by line
+        // INSTANT MODE: If speed is 0, insert all at once
+        if (this.typingSpeed === 0) {
+            console.log(`⚡ INSTANT MODE: Inserting ${tagName} content at once`);
+
+            // Find the closing tag position
+            let currentCloseIndex = this.typedContent.indexOf(closeTag);
+            if (currentCloseIndex === -1) return;
+
+            // Count non-whitespace chars for progress
+            const nonWsChars = (formattedContent.match(/[^\s]/g) || []).length;
+            this.currentChars += nonWsChars;
+
+            // Insert all content before closing tag
+            this.typedContent = this.typedContent.substring(0, currentCloseIndex) +
+                              formattedContent +
+                              this.typedContent.substring(currentCloseIndex);
+
+            this.updateTypedCodeDisplay();
+            this.updateOutputLineNumbers();
+            this.updateProgressBar();
+            this.autoScroll();
+            this.updatePreview();
+            return;
+        }
+
+        // NORMAL MODE: Type content line by line
         const contentLines = formattedContent.split('\n');
         for (let i = 0; i < contentLines.length; i++) {
             const line = contentLines[i];
