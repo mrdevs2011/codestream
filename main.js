@@ -41,9 +41,9 @@ class LiveCodingApp {
         this.lastPreviewContent = ''; // Oxirgi ko'rsatilgan content
         this.wasTypingBeforeBlur = false; // Tab switch uchun
         this.closingTags = []; // tags.json dan yuklanadi
-        this.loadClosingTags(); // Tags ni yuklash
         this.isSaving = false; // Faqat 1 marta saqlash uchun
         this.savedRoomId = null; // Saqlangan room ID
+        this.stopRequested = false; // Async loop stop signal
         // Smooth resize animation
         this.resizeAnimationId = null;
         this.targetWidth = 300;
@@ -227,13 +227,13 @@ class LiveCodingApp {
         }
     }
 
-    // Check URL for room ID in hash (#1, #2, #3...)
+    // Check URL for room ID in hash (#roomId)
     async checkUrlForSharedCode() {
         const hash = window.location.hash;
         if (hash && hash.length > 1) {
             const roomId = hash.substring(1); // Remove # symbol
-            // Check if it's a number
-            if (!isNaN(roomId) && roomId.length > 0) {
+            // Any non-empty room ID is valid
+            if (roomId.length > 0) {
                 console.log('Loading Room:', roomId);
                 await this.loadFromFirebase(roomId);
             }
@@ -376,9 +376,12 @@ class LiveCodingApp {
         }
     }
 
-    init() {
+    async init() {
         // Initialize splash screen
         this.initSplashScreen();
+
+        // Load closing tags from JSON (await to prevent race condition)
+        await this.loadClosingTags();
 
         this.speedSlider = document.getElementById('speed');
         this.previewScaleSlider = document.getElementById('preview-scale');
@@ -432,8 +435,8 @@ class LiveCodingApp {
         // 🎯 BLUR: User yozib bo'lgach auto-refresh boshlansin
         this.inputCode.addEventListener('blur', () => {
             console.log('✏️ User finished typing - resuming auto-refresh');
-            // Faqat editor da kod bo'lsa va typing yo'q bo'lsa
-            if (this.inputCode.value.trim() && !this.isTyping) {
+            // Faqat editor da kod bo'lsa va typing yo'q bo'lsa va autoRefresh yo'q bo'lsa
+            if (this.inputCode.value.trim() && !this.isTyping && !this.autoRefreshEnabled) {
                 this.enableAutoRefresh();
                 this.runTypingCycle();
             }
@@ -548,14 +551,14 @@ class LiveCodingApp {
                 return;
             }
 
-            // Ctrl + C yoki Alt + C - Copy share link (ikkisi ham ishlaydi)
-            if (((isCtrl) || (e.altKey)) && (e.code === 'KeyC' || e.key === 'c' || e.key === 'C')) {
+            // Alt + C - Copy share link (faqat Alt+C ishlaydi, Ctrl+C default copy)
+            if ((e.altKey) && (e.code === 'KeyC' || e.key === 'c' || e.key === 'C')) {
                 // Faqat hech qanday text tanlanmagan bo'lsa
                 const selection = window.getSelection().toString();
                 if (!selection && document.activeElement !== this.inputCode) {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log('🔥 Shortcut: Ctrl/Alt+C - Copy share link');
+                    console.log('🔥 Shortcut: Alt+C - Copy share link');
                     this.copyShareLink();
                     return;
                 }
@@ -902,6 +905,16 @@ class LiveCodingApp {
                 console.log('Resizing ended');
             }
         });
+
+        // touchend for mobile
+        document.addEventListener('touchend', () => {
+            if (isResizing) {
+                isResizing = false;
+                this.resizer.classList.remove('resizing');
+                document.body.style.userSelect = '';
+                console.log('Resizing ended (touch)');
+            }
+        });
     }
 
     // Handle user scroll - check if user is at bottom or not
@@ -1058,12 +1071,6 @@ class LiveCodingApp {
         }
     }
 
-    // ⚠️ ESKI: parsedData dan emas, typedContent dan yangilaymiz
-    updatePreviewFromParsed() {
-        // Endi ishlatilmaydi - updatePreview() ishlatiladi
-        return;
-    }
-
     // Build complete HTML from parsed parts
     buildHTML(data) {
         // 🛡️ NULL CHECK: data obyektini tekshirish
@@ -1079,9 +1086,21 @@ class LiveCodingApp {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>${title}</title>
     <style>
+        /* Responsive base styles */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow-x: hidden;
+        }
+        img, video, canvas, iframe {
+            max-width: 100%;
+            height: auto;
+        }
 ${style}
     </style>
 </head>
@@ -1107,21 +1126,17 @@ ${body}
     }
 
     syncInputScroll() {
-        // Smooth scroll for input line numbers and highlight
+        // Direct scroll for input line numbers and highlight (no smooth to avoid jank)
         const scrollTop = this.inputCode.scrollTop;
         const scrollLeft = this.inputCode.scrollLeft;
 
-        this.inputLineNumbers.scrollTo({
-            top: scrollTop,
-            behavior: 'smooth'
-        });
+        if (this.inputLineNumbers) {
+            this.inputLineNumbers.scrollTop = scrollTop;
+        }
 
         if (this.inputHighlight) {
-            this.inputHighlight.scrollTo({
-                top: scrollTop,
-                left: scrollLeft,
-                behavior: 'smooth'
-            });
+            this.inputHighlight.scrollTop = scrollTop;
+            this.inputHighlight.scrollLeft = scrollLeft;
         }
     }
 
@@ -1262,68 +1277,62 @@ ${body}
     }
 
     updatePreviewScale(value) {
-        if (!this.preview || !this.previewContainer) return;
+        if (!this.previewContainer || !this.preview || !this.previewScaler) return;
 
-        // Default scale - container'ga moslash
-        const containerWidth = this.previewContainer.clientWidth;
-        const containerHeight = this.previewContainer.clientHeight;
+        // Slider: 0 = 320px (mobile), 50 = 1280px (default), 100 = 1920px (desktop)
+        const minW = 320;
+        const maxW = 1920;
+        const RENDER_W = Math.round(minW + (value / 100) * (maxW - minW));
+        const RENDER_H = Math.round(RENDER_W * 0.625); // 16:10 ratio
 
-        // 1920x1080 base scale (fit to container)
-        const baseScaleX = containerWidth / 1920;
-        const baseScaleY = containerHeight / 1080;
-        const baseScale = Math.min(baseScaleX, baseScaleY);
-        const minBaseScale = Math.max(baseScale, 0.3);
+        const containerW = this.previewContainer.clientWidth;
+        const scale = containerW / RENDER_W;
 
-        // Zoom from slider (0-100% -> 1x-3x)
-        const zoomLevel = 1 + (value / 100) * 2;
-        const finalScale = minBaseScale * zoomLevel;
+        this.previewScaler.style.width  = RENDER_W + 'px';
+        this.previewScaler.style.height = RENDER_H + 'px';
+        this.previewScaler.style.transform = `scale(${scale})`;
+        this.previewScaler.style.transformOrigin = 'top left';
 
-        this.preview.style.transform = `scale(${finalScale})`;
-        this.preview.style.width = '1920px';
-        this.preview.style.height = '1080px';
+        this.preview.style.width  = RENDER_W + 'px';
+        this.preview.style.height = RENDER_H + 'px';
 
-        // preview-scaler ham moslashishi kerak
-        if (this.previewScaler) {
-            this.previewScaler.style.width = `${1920 * finalScale}px`;
-            this.previewScaler.style.height = `${1080 * finalScale}px`;
-        }
+        const scaledH = RENDER_H * scale;
+        this.previewContainer.style.height = scaledH + 'px';
+
+        // Update slider label to show current simulated width
+        const vpLabel = document.getElementById('viewport-label');
+        if (vpLabel) vpLabel.textContent = RENDER_W + 'px';
     }
 
     updateScale() {
-        if (!this.previewContainer || !this.preview) {
-            console.warn('⚠️ Preview elements not found for scaling');
-            return;
-        }
+        if (!this.previewContainer || !this.preview) return;
 
-        // Container o'lchamlarini olish
-        const containerWidth = this.previewContainer.clientWidth;
-        const containerHeight = this.previewContainer.clientHeight;
+        const RENDER_W = 1280;   // simulated browser width
+        const RENDER_H = 800;    // simulated browser height (tall enough for scroll)
 
-        console.log(`📐 Container: ${containerWidth}x${containerHeight}`);
+        const containerW = this.previewContainer.clientWidth;
+        const containerH = this.previewContainer.clientHeight;
 
-        // 1920x1080 content'ga mos scale (fit to container)
-        const scaleX = containerWidth / 1920;
-        const scaleY = containerHeight / 1080;
-        const scale = Math.min(scaleX, scaleY);
+        // Scale to fill container width exactly, no margins
+        const scale = containerW / RENDER_W;
 
-        // Minimum scale chegarasi
-        const finalScale = Math.max(scale, 0.3);
-
-        console.log(`🔍 Scale calculated: ${finalScale}`);
-
-        // Default scale (zoom slider = 0)
-        this.preview.style.transform = `scale(${finalScale})`;
-        this.preview.style.width = '1920px';
-        this.preview.style.height = '1080px';
-
-        // preview-scaler ham moslashishi kerak
+        // Apply to scaler wrapper
         if (this.previewScaler) {
-            this.previewScaler.style.width = `${1920 * finalScale}px`;
-            this.previewScaler.style.height = `${1080 * finalScale}px`;
-            console.log(`📏 Scaler size: ${1920 * finalScale}x${1080 * finalScale}`);
+            this.previewScaler.style.width  = RENDER_W + 'px';
+            this.previewScaler.style.height = RENDER_H + 'px';
+            this.previewScaler.style.transform = `scale(${scale})`;
+            this.previewScaler.style.transformOrigin = 'top left';
         }
 
-        return finalScale;
+        // iframe itself renders at full RENDER_W — real browser behavior
+        this.preview.style.width  = RENDER_W + 'px';
+        this.preview.style.height = RENDER_H + 'px';
+
+        // Make preview-container tall enough to show scaled content
+        const scaledH = RENDER_H * scale;
+        this.previewContainer.style.height = scaledH + 'px';
+
+        return scale;
     }
 
     analyzeCode(html) {
@@ -1477,10 +1486,6 @@ ${body}
         }
     }
 
-    resumeTyping() {
-        // Resume will be handled by the typing loop checking isPaused
-    }
-
     async startTyping() {
         console.log('startTyping called');
 
@@ -1501,7 +1506,7 @@ ${body}
         console.log('Input length:', input.length);
 
         if (!input) {
-            this.showErrors(['Please enter HTML code first']);
+            this.showErrors(['ERROR: Please enter HTML code first']);
             return;
         }
 
@@ -1509,8 +1514,9 @@ ${body}
         this.parseInputCode();
         console.log('Parsed data:', this.parsedData);
 
-        // Check for actual blocking errors
-        const hasBlockingErrors = this.parsedData.errors.some(e => e.includes('ERROR:'));
+        // Check for actual blocking errors (with null safety)
+        const errors = this.parsedData?.errors || [];
+        const hasBlockingErrors = errors.some(e => e && e.includes('ERROR:'));
         if (hasBlockingErrors) {
             console.log('Has blocking errors, not starting');
             // Don't start if there are blocking errors
@@ -1580,17 +1586,7 @@ ${body}
 
         console.log('Structure typing complete');
 
-        // FIRST: Type body content if exists
-        if (bodyContent) {
-            console.log('Typing body content...');
-            if (this.typingSpeed !== 0) {
-                await this.scrollToTag('body');
-                await this.sleep(300);
-            }
-            await this.typeIntoTag('body', bodyContent);
-        }
-
-        // SECOND: Type style content if exists
+        // FIRST: Type style content if exists
         if (styleContent) {
             console.log('Typing style content...');
             if (this.typingSpeed !== 0) {
@@ -1598,6 +1594,16 @@ ${body}
                 await this.sleep(300);
             }
             await this.typeIntoTag('style', styleContent);
+        }
+
+        // SECOND: Type body content if exists
+        if (bodyContent) {
+            console.log('Typing body content...');
+            if (this.typingSpeed !== 0) {
+                await this.scrollToTag('body');
+                await this.sleep(300);
+            }
+            await this.typeIntoTag('body', bodyContent);
         }
 
         // ⚡ INSTANT MODE: Update preview only once at the end
@@ -1611,20 +1617,6 @@ ${body}
 
         // 🔄 Typing tugadi - oxirgi content ni saqlash
         this.lastPreviewContent = this.typedContent;
-        console.log('✅ Typing complete!');
-    }
-
-    // 🔄 Auto-refresh - Har 1 sekundda (typing tezligidan qat'iy nazar)
-    startAutoRefresh() {
-        // Agar oldingi interval bo'lsa, tozalash
-        if (this.autoRefreshInterval) {
-            clearInterval(this.autoRefreshInterval);
-        }
-
-        console.log('⏱️ Auto-refresh: EXACTLY every 1 second');
-
-        // 🔄 Typing tugagachgina yangi cycle (white flash oldini olish uchun)
-        this.runTypingCycle();
     }
 
     // 🔄 Typing cycle - typing tugagachgina yangi cycle
@@ -1663,7 +1655,8 @@ ${body}
 
         // 7. Yangi cycle (agar auto-refresh hali yoqilmagan bo'lsa)
         if (this.autoRefreshEnabled) {
-            this.runTypingCycle();
+            // setTimeout bilan rekursiv stack dan qochish
+            setTimeout(() => this.runTypingCycle(), 0);
         }
     }
 
@@ -1677,6 +1670,8 @@ ${body}
         this.autoRefreshEnabled = false;
         // 🛑 Joriy typing ni to'xtatish (agar ishlayotgan bo'lsa)
         this.isTyping = false;
+        this.isPaused = false;
+        this.stopRequested = true; // Signal to stop async loops
         console.log('⏸️ Auto-refresh disabled');
     }
 
@@ -1773,11 +1768,6 @@ ${body}
         // Line tugaganda oddiy yangilanish
         this.updatePreviewSimple();
         console.log('Line complete, typedContent length:', this.typedContent.length);
-    }
-
-    async typeLine(text) {
-        // Delegate to typeLineWithCursor for consistency
-        await this.typeLineWithCursor(text);
     }
 
     updateTypedCodeDisplay() {

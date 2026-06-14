@@ -1,17 +1,12 @@
 {
   "rules": {
-    ".read": true,
-    ".write": true,
+    ".read": false,
+    ".write": false,
     "codes": {
       "$roomId": {
         ".read": true,
-        ".write": true
-      }
-    },
-    "counters": {
-      "roomCounter": {
-        ".read": true,
-        ".write": true
+        ".write": true,
+        ".validate": "newData.hasChildren(['code', 'title', 'timestamp'])"
       }
     }
   }

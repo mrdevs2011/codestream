@@ -45,7 +45,7 @@
             </div>
 
             <div class="slider-group">
-                <label>Preview Scale</label>
+                <label>Viewport Width <span id="viewport-label" style="color:#00d4ff;float:right;">1280px</span></label>
                 <input type="range" id="preview-scale" min="0" max="100" value="0">
             </div>
 
@@ -80,7 +80,7 @@
             </div>
             <div class="preview-container" id="preview-wrapper">
                 <div class="preview-scaler" id="preview-scaler">
-                    <iframe id="preview" sandbox="allow-scripts"></iframe>
+                    <iframe id="preview" sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"></iframe>
                 </div>
             </div>
         </div>

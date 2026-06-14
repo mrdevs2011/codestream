@@ -525,42 +525,26 @@ button:hover {
 
 /* Preview */
 .preview-container {
-    height: 55%;
-    background: #ffffff; /* ⚪ SHOW doim oq */
-    overflow: auto;
+    height: 60%;
+    background: #ffffff;
+    overflow: hidden;
     position: relative;
-    cursor: grab;
-    display: flex;
-    align-items: flex-start;
-    justify-content: flex-start;
-}
-
-.preview-container:active {
-    cursor: grabbing;
+    display: block;
 }
 
 .preview-scaler {
-    width: 1920px;
-    height: 1080px;
-    min-width: 100px;
-    min-height: 100px;
-    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
     transform-origin: top left;
-    flex-shrink: 0;
-    background: #ffffff; /* ⚪ SHOW doim oq */
+    /* width, height, transform set by JS */
 }
 
 #preview {
-    width: 1920px;
-    height: 1080px;
-    min-width: 100px;
-    min-height: 100px;
-    border: none;
-    background: #ffffff; /* ⚪ SHOW doim oq */
     display: block;
-    transform-origin: top left;
-    /* Hech qanday fade transition yo'q */
-    opacity: 1;
+    border: none;
+    background: #ffffff;
+    /* width and height set by JS */
 }
 
 /* Iframe content background - doim oq */
