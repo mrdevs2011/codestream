@@ -1026,6 +1026,8 @@ class LiveCodingApp {
             errors: errors
         };
 
+        console.log('[DEBUG] parseInputCode: body extracted, length:', body.length, 'preview:', body.substring(0, 100));
+
         // Show validation errors
         this.showErrors(errors);
 
@@ -1567,6 +1569,8 @@ ${body}
         const bodyContent = data.body || '';
         const styleContent = data.style || '';
 
+        console.log('[DEBUG] realTyping: bodyContent length:', bodyContent.length, 'content:', bodyContent.substring(0, 100));
+
         // Build the complete HTML structure with actual title
         const htmlStructure = this.buildHTML({
             title: title,
@@ -1585,8 +1589,20 @@ ${body}
         }
 
         console.log('Structure typing complete');
+        console.log('[DEBUG] typedContent after structure:', this.typedContent.substring(this.typedContent.length - 200));
 
-        // FIRST: Type style content if exists
+        // FIRST: Type body content if exists
+        if (bodyContent) {
+            console.log('Typing body content...');
+            if (this.typingSpeed !== 0) {
+                await this.scrollToTag('body');
+                await this.sleep(300);
+            }
+            await this.typeIntoTag('body', bodyContent);
+            console.log('[DEBUG] After typing body, typedContent length:', this.typedContent.length);
+        }
+
+        // SECOND: Type style content if exists
         if (styleContent) {
             console.log('Typing style content...');
             if (this.typingSpeed !== 0) {
@@ -1596,17 +1612,8 @@ ${body}
             await this.typeIntoTag('style', styleContent);
         }
 
-        // SECOND: Type body content if exists
-        if (bodyContent) {
-            console.log('Typing body content...');
-            if (this.typingSpeed !== 0) {
-                await this.scrollToTag('body');
-                await this.sleep(300);
-            }
-            await this.typeIntoTag('body', bodyContent);
-        }
-
         // ⚡ INSTANT MODE: Update preview only once at the end
+        console.log('[DEBUG] Final typedContent body section:', this.typedContent.match(/<body>[\s\S]*?<\/body>/)?.[0]?.substring(0, 200));
         console.log('⚡ Updating preview once at the end...');
         this.updateTypedCodeDisplay();
         this.updateOutputLineNumbers();
@@ -1814,6 +1821,8 @@ ${body}
                 formattedContent += '\n    ' + line;
             }
         }
+
+        console.log(`[DEBUG] typeIntoTag('${tagName}'): ${lines.length} lines, formatted length ${formattedContent.length}`);
 
         // CHARACTER BY CHARACTER: Always type content character by character
         // for visual animation effect
