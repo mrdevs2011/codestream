@@ -188,6 +188,11 @@ class LiveCodingApp {
 
             if (snapshot.exists()) {
                 const data = snapshot.val();
+
+                // 🔄 RESET: Clear previous output before loading new code
+                console.log('🔄 Resetting output before loading new code...');
+                this.resetOutputOnly();
+
                 this.inputCode.value = data.code;
                 this.currentShareId = codeId;
 
@@ -206,6 +211,9 @@ class LiveCodingApp {
 
                 // 🎬 AUTO PLAY MODE: URL orqali kirgan foydalanuvchilar uchun
                 console.log('🎬 Starting auto-play mode...');
+
+                // Small delay to ensure UI is ready
+                await this.sleep(200);
                 this.startAutoPlay();
             } else {
                 const shortCodeId = codeId.substring(0, 10) + '...';
@@ -348,10 +356,10 @@ class LiveCodingApp {
         // Initialize keyboard shortcuts
         this.initKeyboardShortcuts();
 
-        // Check for auto-replay (URL or localStorage)
+        // Check for auto-replay (URL or localStorage) - wait for splash screen to finish
         setTimeout(() => {
             this.checkForAutoReplay();
-        }, 800);
+        }, 2500);
     }
 
     // Check for auto-replay: URL room OR localStorage saved code
@@ -372,11 +380,18 @@ class LiveCodingApp {
         const savedCode = localStorage.getItem('liveCoding_savedCode');
         if (savedCode && savedCode.trim()) {
             console.log('🎬 Auto-replay from localStorage');
+
+            // 🔄 RESET: Clear previous output
+            this.resetOutputOnly();
+
             this.inputCode.value = savedCode;
             this.currentShareId = localStorage.getItem('liveCoding_lastRoomId');
             this.updateInputLineNumbers();
             this.highlightInput();
             this.parseInputCode();
+
+            // Small delay to ensure UI is ready
+            await this.sleep(200);
 
             // Auto-start typing animation
             await this.startAutoPlay();
@@ -1121,16 +1136,31 @@ ${data.body}
     }
 
     resetOutputOnly() {
+        console.log('🔄 Resetting output...');
         this.isTyping = false;
         this.isPaused = false;
         this.userScrolled = false;
         this.typedContent = '';
-        this.typedCode.innerHTML = '';
-        this.preview.srcdoc = '';
+
+        // Safety check: ensure elements exist
+        if (this.typedCode) {
+            this.typedCode.innerHTML = '';
+        }
+        if (this.preview) {
+            this.preview.srcdoc = '';
+        }
+        if (this.outputLineNumbers) {
+            this.outputLineNumbers.textContent = '1';
+        }
+
         this.currentChars = 0;
         this.totalChars = 0;
-        this.progressValue.textContent = '0/0 chars (0.0%)';
-        this.errorDisplay.classList.add('hidden');
+        if (this.progressValue) {
+            this.progressValue.textContent = '0/0 chars (0.0%)';
+        }
+        if (this.errorDisplay) {
+            this.errorDisplay.classList.add('hidden');
+        }
         // Smooth scroll to top for code display
         if (this.codeDisplay) {
             this.codeDisplay.scrollTo({
@@ -1140,6 +1170,7 @@ ${data.body}
         }
         // Restart preview interval
         this.startPreviewInterval();
+        console.log('✅ Output reset complete');
     }
 
     handlePauseClick() {
