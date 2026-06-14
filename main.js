@@ -394,10 +394,12 @@ class LiveCodingApp {
         this.preview = document.getElementById('preview');
         this.previewContainer = document.getElementById('preview-wrapper');
         this.previewScaler = document.getElementById('preview-scaler');
+        this.codeDisplayWrapper = document.getElementById('code-display-wrapper');
         this.codeDisplay = document.querySelector('.code-display');
         this.errorDisplay = document.getElementById('error-display');
         this.inputLineNumbers = document.getElementById('input-line-numbers');
         this.outputLineNumbers = document.getElementById('output-line-numbers');
+        this.panelResizer = document.getElementById('panel-resizer');
 
         // Speed slider - linear from 200ms to 0.5ms
         // Update display and typing speed
@@ -484,6 +486,9 @@ class LiveCodingApp {
 
         // Initialize resizer for panels
         this.initResizer();
+
+        // Initialize vertical panel resizer (code display vs preview)
+        this.initPanelResizer();
 
         // Initialize panel toggle
         this.initPanelToggle();
@@ -932,6 +937,117 @@ class LiveCodingApp {
                 console.log('Resizing ended (touch)');
             }
         });
+    }
+
+    // Initialize vertical resizer between code display and preview
+    initPanelResizer() {
+        if (!this.panelResizer || !this.codeDisplayWrapper || !this.previewContainer) {
+            console.log('Panel resizer elements not found');
+            return;
+        }
+
+        console.log('Panel resizer initialized');
+
+        let isResizing = false;
+        let targetCodePercent = 40;
+        let animationId = null;
+        const rightPanel = this.codeDisplayWrapper.parentElement;
+
+        // Smooth animation loop
+        const animateResize = () => {
+            if (!isResizing) {
+                animationId = null;
+                return;
+            }
+
+            const currentCodePercent = parseFloat(this.codeDisplayWrapper.style.height) || 40;
+            const diff = targetCodePercent - currentCodePercent;
+
+            // Smooth easing
+            const speed = 0.15;
+            const newPercent = currentCodePercent + diff * speed;
+
+            this.codeDisplayWrapper.style.height = newPercent + '%';
+            this.previewContainer.style.height = (100 - newPercent) + '%';
+
+            this.updateScale();
+
+            if (isResizing) {
+                animationId = requestAnimationFrame(animateResize);
+            } else {
+                animationId = null;
+            }
+        };
+
+        const startResize = (clientY) => {
+            isResizing = true;
+            this.panelResizer.classList.add('resizing');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+
+            // Calculate current percentage based on mouse position
+            const panelRect = rightPanel.getBoundingClientRect();
+            const relativeY = clientY - panelRect.top;
+            targetCodePercent = (relativeY / panelRect.height) * 100;
+
+            // Clamp between 5% and 95%
+            targetCodePercent = Math.max(5, Math.min(95, targetCodePercent));
+
+            console.log('Start resize:', targetCodePercent.toFixed(1) + '%');
+
+            if (!animationId) {
+                animationId = requestAnimationFrame(animateResize);
+            }
+        };
+
+        const updateResize = (clientY) => {
+            if (!isResizing) return;
+
+            const panelRect = rightPanel.getBoundingClientRect();
+            const relativeY = clientY - panelRect.top;
+            targetCodePercent = (relativeY / panelRect.height) * 100;
+
+            // Clamp between 5% and 95%
+            targetCodePercent = Math.max(5, Math.min(95, targetCodePercent));
+
+            console.log('Update resize:', targetCodePercent.toFixed(1) + '%');
+        };
+
+        const endResize = () => {
+            if (isResizing) {
+                isResizing = false;
+                this.panelResizer.classList.remove('resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        };
+
+        // Mouse events
+        this.panelResizer.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            startResize(e.clientY);
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            updateResize(e.clientY);
+        });
+
+        document.addEventListener('mouseup', endResize);
+
+        // Touch events
+        this.panelResizer.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            startResize(e.touches[0].clientY);
+        }, { passive: false });
+
+        document.addEventListener('touchmove', (e) => {
+            if (isResizing) {
+                e.preventDefault();
+                updateResize(e.touches[0].clientY);
+            }
+        }, { passive: false });
+
+        document.addEventListener('touchend', endResize);
     }
 
     // Handle user scroll - smart auto-scroll detection
@@ -1569,6 +1685,9 @@ ${body}
         this.isTyping = false;
         this.isPaused = false;
 
+        // Remove typing cursor when complete
+        this.removeTypingCursor();
+
         // Restart auto-preview after typing
         this.startPreviewInterval();
     }
@@ -1766,7 +1885,7 @@ ${body}
             }
 
             this.typedContent += char;
-            this.updateTypedCodeDisplay();
+            this.updateTypedCodeDisplay(true);
             if (!/\s/.test(char)) {
                 this.currentChars++;
             }
@@ -1785,7 +1904,7 @@ ${body}
             await this.sleep(Math.max(4, this.typingSpeed + variation));
         }
         this.typedContent += '\n';
-        this.updateTypedCodeDisplay();
+        this.updateTypedCodeDisplay(true);
         this.updateOutputLineNumbers();
         this.autoScroll();
 
@@ -1794,7 +1913,7 @@ ${body}
         console.log('Line complete, typedContent length:', this.typedContent.length);
     }
 
-    updateTypedCodeDisplay() {
+    updateTypedCodeDisplay(showCursor = false) {
         if (!this.typedCode) {
             console.log('typedCode element not found!');
             return;
@@ -1802,7 +1921,26 @@ ${body}
 
         // Always use Prism highlighting for nice visuals
         if (window.Prism && Prism.languages && Prism.languages.html) {
-            // Use Prism.highlight to generate highlighted HTML
+            // Highlight the entire content at once (correct highlighting)
+            const highlighted = Prism.highlight(this.typedContent, Prism.languages.html, 'html');
+
+            // Add cursor at the end if typing is active
+            if (showCursor && this.isTyping) {
+                this.typedCode.innerHTML = highlighted + '<span class="typing-cursor"></span>';
+            } else {
+                this.typedCode.innerHTML = highlighted;
+            }
+        } else {
+            this.typedCode.textContent = this.typedContent;
+        }
+    }
+
+    // Remove cursor when typing is complete
+    removeTypingCursor() {
+        if (!this.typedCode) return;
+
+        // Re-render without cursor
+        if (window.Prism && Prism.languages && Prism.languages.html) {
             const highlighted = Prism.highlight(this.typedContent, Prism.languages.html, 'html');
             this.typedCode.innerHTML = highlighted;
         } else {
@@ -1864,7 +2002,8 @@ ${body}
                                   char +
                                   this.typedContent.substring(currentCloseIndex);
 
-                this.updateTypedCodeDisplay();
+                // Cursor position is right after the inserted character
+                this.updateTypedCodeDisplay(true);
                 if (!/\s/.test(char)) {
                     this.currentChars++;
                 }
@@ -1883,16 +2022,14 @@ ${body}
             }
 
             // Add newline after each line except the last
-            if (i < contentLines.length - 1) {
-                let currentCloseIndex = this.typedContent.indexOf(closeTag);
-                if (currentCloseIndex !== -1) {
-                    this.typedContent = this.typedContent.substring(0, currentCloseIndex) +
-                                      '\n' +
-                                      this.typedContent.substring(currentCloseIndex);
-                }
+            let closeIdxForNewline = this.typedContent.indexOf(closeTag);
+            if (i < contentLines.length - 1 && closeIdxForNewline !== -1) {
+                this.typedContent = this.typedContent.substring(0, closeIdxForNewline) +
+                                  '\n' +
+                                  this.typedContent.substring(closeIdxForNewline);
             }
 
-            this.updateTypedCodeDisplay();
+            this.updateTypedCodeDisplay(true);
             this.updateOutputLineNumbers();
             this.autoScroll();
         }
