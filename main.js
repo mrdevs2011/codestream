@@ -1,3 +1,23 @@
+// Firebase imports
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+import { getDatabase, ref, set, get, child, runTransaction } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';
+
+// Firebase configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyD3WNuR8LcsjgHo_No1zuIxPbiT9X6Mvd0",
+    authDomain: "codestream-b01d8.firebaseapp.com",
+    databaseURL: "https://codestream-b01d8-default-rtdb.firebaseio.com",
+    projectId: "codestream-b01d8",
+    storageBucket: "codestream-b01d8.firebasestorage.app",
+    messagingSenderId: "175692262236",
+    appId: "1:175692262236:web:854dad4ac2dbb10d01ef99",
+    measurementId: "G-88S0KER1J6"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+
 class LiveCodingApp {
     constructor() {
         this.isTyping = false;
@@ -20,6 +40,8 @@ class LiveCodingApp {
         // Smooth resize animation
         this.resizeAnimationId = null;
         this.targetWidth = 300;
+        // Current saved ID for sharing
+        this.currentShareId = null;
         this.init();
     }
 
@@ -45,6 +67,139 @@ class LiveCodingApp {
                 }
             }, 500);
         }, 2000); // Show for 2 seconds to see logo animation
+    }
+
+    // Get next room ID (auto-increment: 1, 2, 3...)
+    async getNextRoomId() {
+        try {
+            const counterRef = ref(database, 'counters/roomCounter');
+            const result = await runTransaction(counterRef, (currentValue) => {
+                return (currentValue || 0) + 1;
+            });
+            return result.snapshot.val();
+        } catch (error) {
+            console.error('Error getting next room ID:', error);
+            // Fallback to random ID if transaction fails
+            return Math.floor(Math.random() * 1000000);
+        }
+    }
+
+    // Show notification toast
+    showToast(message, type = 'success') {
+        // Remove existing toast
+        const existingToast = document.querySelector('.toast-notification');
+        if (existingToast) {
+            existingToast.remove();
+        }
+
+        const toast = document.createElement('div');
+        toast.className = `toast-notification ${type}`;
+        toast.innerHTML = `
+            <span class="toast-icon">${type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ'}</span>
+            <span class="toast-message">${message}</span>
+        `;
+        document.body.appendChild(toast);
+
+        // Trigger animation
+        setTimeout(() => toast.classList.add('show'), 10);
+
+        // Remove after 3 seconds
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // Copy text to clipboard
+    async copyToClipboard(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (err) {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                return true;
+            } catch (e) {
+                return false;
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        }
+    }
+
+    // Check URL for room ID in hash (#1, #2, #3...)
+    async checkUrlForSharedCode() {
+        const hash = window.location.hash;
+        if (hash && hash.length > 1) {
+            const roomId = hash.substring(1); // Remove # symbol
+            // Check if it's a number
+            if (!isNaN(roomId) && roomId.length > 0) {
+                console.log('Loading Room:', roomId);
+                await this.loadFromFirebase(roomId);
+            }
+        }
+    }
+
+    // Load code from Firebase by ID
+    async loadFromFirebase(codeId) {
+        try {
+            const dbRef = ref(database);
+            const snapshot = await get(child(dbRef, `codes/${codeId}`));
+
+            if (snapshot.exists()) {
+                const data = snapshot.val();
+                this.inputCode.value = data.code;
+                this.currentShareId = codeId;
+                this.updateInputLineNumbers();
+                this.highlightInput();
+                this.parseInputCode();
+                this.showToast(`Loaded Room #${codeId} (${data.title || 'Untitled'})`, 'success');
+                console.log('Code loaded from Room:', codeId);
+            } else {
+                this.showToast(`Room #${codeId} not found!`, 'error');
+            }
+        } catch (error) {
+            console.error('Error loading from Firebase:', error);
+            this.showToast('Failed to load code', 'error');
+        }
+    }
+
+    // Save code to Firebase with auto-increment room ID
+    async saveToFirebase() {
+        const code = this.inputCode.value;
+        if (!code.trim()) {
+            this.showToast('No code to save!', 'error');
+            return null;
+        }
+
+        // Get next room number (1, 2, 3...)
+        const roomId = await this.getNextRoomId();
+
+        const data = {
+            code: code,
+            title: this.parsedData.title || 'Untitled',
+            timestamp: Date.now(),
+            createdAt: new Date().toISOString(),
+            roomId: roomId
+        };
+
+        try {
+            await set(ref(database, `codes/${roomId}`), data);
+            this.currentShareId = roomId;
+            console.log('Code saved to Firebase Room:', roomId);
+            return roomId;
+        } catch (error) {
+            console.error('Error saving to Firebase:', error);
+            this.showToast('Failed to save to cloud', 'error');
+            return null;
+        }
     }
 
     init() {
@@ -112,6 +267,9 @@ class LiveCodingApp {
 
         // Initialize keyboard shortcuts
         this.initKeyboardShortcuts();
+
+        // Check URL for shared code
+        this.checkUrlForSharedCode();
     }
 
     // Initialize keyboard shortcuts
@@ -149,11 +307,15 @@ class LiveCodingApp {
                 this.saveCode();
             }
 
-            // Ctrl/Cmd + O - Open/Load saved code
-            if (isCtrl && e.key === 'o') {
-                e.preventDefault();
-                console.log('Shortcut: Ctrl+O - Load code');
-                this.loadCode();
+            // Ctrl/Cmd + C - Copy share link
+            if (isCtrl && e.key === 'c') {
+                // Only if not text is selected (let browser handle copy if text selected)
+                const selection = window.getSelection().toString();
+                if (!selection && document.activeElement !== this.inputCode) {
+                    e.preventDefault();
+                    console.log('Shortcut: Ctrl+C - Copy share link');
+                    this.copyShareLink();
+                }
             }
 
             // Ctrl/Cmd + / - Toggle comment (if in textarea)
@@ -167,38 +329,50 @@ class LiveCodingApp {
         });
     }
 
-    // Save code to localStorage
-    saveCode() {
+    // Save code to Firebase + localStorage (Ctrl+S)
+    async saveCode() {
         const code = this.inputCode.value;
         if (!code.trim()) {
-            alert('No code to save!');
+            this.showToast('No code to save!', 'error');
             return;
         }
+
+        // 1. Save to localStorage
         localStorage.setItem('liveCoding_savedCode', code);
         localStorage.setItem('liveCoding_savedTime', new Date().toLocaleString());
         localStorage.setItem('liveCoding_savedTitle', this.parsedData.title || 'Untitled');
 
-        // Show save location info
-        const saveInfo = `✓ Code saved successfully!\n\nTitle: ${this.parsedData.title || 'Untitled'}\nLocation: Browser LocalStorage\nTime: ${new Date().toLocaleString()}\n\nNote: This is saved in your browser's memory and will persist across sessions.`;
-        alert(saveInfo);
-        console.log('Code saved to localStorage:', this.parsedData.title || 'Untitled');
-        console.log('To view saved data, open DevTools (F12) → Application → LocalStorage');
+        // 2. Save to Firebase
+        const roomId = await this.saveToFirebase();
+
+        if (roomId) {
+            // Update URL with hash format: #1, #2, #3...
+            window.location.hash = roomId;
+            this.showToast(`Saved to Room #${roomId}!`, 'success');
+            console.log('Code saved to Room:', roomId);
+        } else {
+            this.showToast('Code saved! (Browser only)', 'success');
+            console.log('Code saved to localStorage only');
+        }
     }
 
-    // Load code from localStorage
-    loadCode() {
-        const savedCode = localStorage.getItem('liveCoding_savedCode');
-        if (savedCode) {
-            this.inputCode.value = savedCode;
-            this.updateInputLineNumbers();
-            this.highlightInput();
-            this.parseInputCode();
-            const savedTime = localStorage.getItem('liveCoding_savedTime');
-            alert(`Code loaded! (Saved: ${savedTime})`);
-            console.log('Code loaded from localStorage');
-        } else {
-            alert('No saved code found!');
+    // Copy share link to clipboard (Ctrl+C)
+    async copyShareLink() {
+        if (!this.currentShareId) {
+            this.showToast('No room yet! Press Ctrl+S first', 'error');
+            return;
         }
+
+        const shareUrl = `${window.location.origin}${window.location.pathname}#${this.currentShareId}`;
+        const copied = await this.copyToClipboard(shareUrl);
+
+        if (copied) {
+            this.showToast('Room link copied!', 'success');
+        } else {
+            this.showToast(`Room link: ${shareUrl}`, 'info');
+        }
+
+        console.log('Room URL copied:', shareUrl);
     }
 
     // Toggle comment for selected lines

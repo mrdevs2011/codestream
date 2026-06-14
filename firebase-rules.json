@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "codes": {
+      "$roomId": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "counters": {
+      "roomCounter": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
