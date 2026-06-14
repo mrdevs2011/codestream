@@ -35,13 +35,22 @@ class LiveCodingApp {
             hasErrors: false,
             errors: []
         };
-        // Preview update interval
+        // Preview update
         this.previewInterval = null;
+        this.previewUpdating = false; // Crossfade animatsiya flag
+        this.lastPreviewContent = ''; // Oxirgi ko'rsatilgan content
+        this.wasTypingBeforeBlur = false; // Tab switch uchun
+        this.closingTags = []; // tags.json dan yuklanadi
+        this.loadClosingTags(); // Tags ni yuklash
+        this.isSaving = false; // Faqat 1 marta saqlash uchun
+        this.savedRoomId = null; // Saqlangan room ID
         // Smooth resize animation
         this.resizeAnimationId = null;
         this.targetWidth = 300;
         // Current saved ID for sharing
         this.currentShareId = null;
+        // Auto-refresh flag
+        this.autoRefreshEnabled = false;
         this.init();
     }
 
@@ -52,8 +61,16 @@ class LiveCodingApp {
 
         if (!splash) return;
 
+        // 🧊 FREEZE: Add splash-active class to body to freeze background
+        document.body.classList.add('splash-active');
+        console.log('🧊 Splash screen: Background frozen');
+
         // Hide splash screen after animation completes
         setTimeout(() => {
+            // ❄️ UNFREEZE: Remove splash-active class before showing main content
+            document.body.classList.remove('splash-active');
+            console.log('❄️ Splash screen: Background unfrozen');
+
             splash.classList.add('hidden');
             if (mainContainer) {
                 mainContainer.classList.add('visible');
@@ -67,6 +84,49 @@ class LiveCodingApp {
                 }
             }, 500);
         }, 2000); // Show for 2 seconds to see logo animation
+    }
+
+    // Load closing tags from tags.json
+    async loadClosingTags() {
+        try {
+            const response = await fetch('tags.json');
+            const data = await response.json();
+            this.closingTags = data.htmlTags || [];
+            this.cssTriggers = data.cssTriggers || ['{'];
+            console.log('✅ Loaded', this.closingTags.length, 'closing tags');
+        } catch (e) {
+            console.error('Failed to load tags.json:', e);
+            this.closingTags = [];
+            this.cssTriggers = ['{'];
+        }
+    }
+
+    // Check if content ends with a closing tag from tags.json
+    endsWithClosingTag(content) {
+        if (!this.closingTags || this.closingTags.length === 0) return false;
+
+        // Oxiridagi 30 ta belgini olish
+        const lastChars = content.slice(-30);
+
+        for (const tag of this.closingTags) {
+            // Tag content oxirida bormi?
+            const tagIndex = lastChars.lastIndexOf(tag);
+            if (tagIndex !== -1) {
+                // Tag dan keyin nima bor?
+                const afterTag = lastChars.substring(tagIndex + tag.length);
+                // Agar faqat bo'sh joy, yangi qatar yoki hech narsa bo'lmasa
+                if (/^[\s\n]*$/.test(afterTag)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Check if content ends with CSS trigger
+    endsWithCssTrigger(content) {
+        if (!this.cssTriggers || this.cssTriggers.length === 0) return false;
+        return this.cssTriggers.some(trigger => content.endsWith(trigger));
     }
 
     // Generate unique room ID: a3a4eqfasr3qrqw34u398ruasdfuhor732q8y3287q49
@@ -189,24 +249,35 @@ class LiveCodingApp {
             if (snapshot.exists()) {
                 const data = snapshot.val();
 
-                // 🔄 RESET: Clear previous output before loading new code
-                console.log('🔄 Resetting output before loading new code...');
-                this.resetOutputOnly();
+                // 🛡️ NULL CHECK: data obyektini tekshirish
+                if (!data || typeof data !== 'object') {
+                    console.error('Invalid data received from Firebase');
+                    this.showToast('Invalid data received', 'error');
+                    return;
+                }
 
-                this.inputCode.value = data.code;
+                // 🔄 NO WHITEFLASH: Faqat typedContent ni reset qilish
+                console.log('🔄 Resetting output before loading new code...');
+                this.typedContent = '';
+                if (this.typedCode) this.typedCode.innerHTML = '';
+                if (this.outputLineNumbers) this.outputLineNumbers.textContent = '1';
+                this.currentChars = 0;
+                this.totalChars = 0;
+
+                // 🛡️ NULL CHECK: data.code tekshirish
+                this.inputCode.value = (data && data.code) ? data.code : '';
                 this.currentShareId = codeId;
 
-                // Save to localStorage for auto-replay on refresh
-                localStorage.setItem('liveCoding_savedCode', data.code);
-                localStorage.setItem('liveCoding_savedTitle', data.title || 'Untitled');
-                localStorage.setItem('liveCoding_lastRoomId', codeId);
+                // ⚠️ NO localStorage - fresh load every time
 
                 this.updateInputLineNumbers();
                 this.highlightInput();
                 this.parseInputCode();
 
                 const shortCodeId = codeId.substring(0, 10) + '...';
-                this.showToast(`Loaded Room #${shortCodeId} (${data.title || 'Untitled'})`, 'success');
+                // 🛡️ NULL CHECK: data.title tekshirish
+                const title = (data && data.title) ? data.title : 'Untitled';
+                this.showToast(`Loaded Room #${shortCodeId} (${title})`, 'success');
                 console.log('Code loaded from Room:', codeId.substring(0, 20) + '...');
 
                 // 🎬 AUTO PLAY MODE: URL orqali kirgan foydalanuvchilar uchun
@@ -227,12 +298,13 @@ class LiveCodingApp {
 
     // Auto-play mode for URL visitors (no user interaction needed)
     async startAutoPlay() {
-        console.log('🚀 Auto-play: Setting speed to INSTANT (0ms)...');
+        console.log('🚀 Auto-play: Starting with 1-second refresh cycle...');
 
-        // 1. Set speed to INSTANT (0ms delay)
-        this.typingSpeed = 0; // 0ms = instant typing
-        this.speedSlider.value = 100;
-        this.updateSpeedDisplay(100);
+        // 1. Default speed (NO localStorage)
+        const speedValue = 70;
+        this.typingSpeed = this.calculateTypingSpeed(speedValue);
+        this.speedSlider.value = speedValue;
+        this.updateSpeedDisplay(speedValue);
 
         // Wait for UI to update
         await this.sleep(100);
@@ -246,16 +318,26 @@ class LiveCodingApp {
         // Wait for animation
         await this.sleep(300);
 
-        // 3. Start typing (like Ctrl+Enter)
-        console.log('🚀 Auto-play: Starting instant typing...');
-        this.handlePlayClick();
+        // 3. Start typing and auto-refresh cycle
+        console.log('🚀 Auto-play: Starting cycle...');
 
-        console.log('✅ Auto-play mode activated! Speed: 0ms');
+        // 4. Enable auto-refresh and start cycle
+        this.enableAutoRefresh();
+        this.runTypingCycle();
+
+        console.log('✅ Auto-play mode activated! Cycle-based refresh');
     }
 
     // Save code to Firebase with auto-increment room ID
     async saveToFirebase() {
         console.log('saveToFirebase started...');
+
+        // 🛡️ NULL CHECK: inputCode mavjudligini tekshirish
+        if (!this.inputCode || !this.inputCode.value) {
+            this.showToast('No code to save!', 'error');
+            return null;
+        }
+
         const code = this.inputCode.value;
         if (!code.trim()) {
             this.showToast('No code to save!', 'error');
@@ -268,9 +350,13 @@ class LiveCodingApp {
             const roomId = await this.getUniqueRoomId();
             console.log('Got room ID:', roomId.substring(0, 20) + '...');
 
+            // 🛡️ NULL CHECK: parsedData tekshirish
+            const parsedData = this.parsedData || {};
+            const title = parsedData.title || 'Untitled';
+
             const data = {
                 code: code,
-                title: this.parsedData.title || 'Untitled',
+                title: title,
                 timestamp: Date.now(),
                 createdAt: new Date().toISOString(),
                 roomId: roomId
@@ -285,7 +371,7 @@ class LiveCodingApp {
             console.error('❌ Error saving to Firebase:', error);
             console.error('Error code:', error.code);
             console.error('Error message:', error.message);
-            this.showToast('Cloud save failed: ' + error.message, 'error');
+            this.showToast('Cloud save failed: ' + (error.message || 'Unknown error'), 'error');
             return null;
         }
     }
@@ -302,6 +388,7 @@ class LiveCodingApp {
         this.typedCode = document.getElementById('typed-code');
         this.preview = document.getElementById('preview');
         this.previewContainer = document.getElementById('preview-wrapper');
+        this.previewScaler = document.getElementById('preview-scaler');
         this.codeDisplay = document.querySelector('.code-display');
         this.errorDisplay = document.getElementById('error-display');
         this.inputLineNumbers = document.getElementById('input-line-numbers');
@@ -313,8 +400,10 @@ class LiveCodingApp {
             const val = parseInt(e.target.value);
             this.typingSpeed = this.calculateTypingSpeed(val);
             this.updateSpeedDisplay(val);
+            // ⚠️ NO localStorage - speed resets every time
         });
-        // Initialize display
+
+        // Initialize display - default speed
         this.updateSpeedDisplay(70);
 
         // Preview scale
@@ -334,10 +423,36 @@ class LiveCodingApp {
         });
         this.inputCode.addEventListener('scroll', () => this.syncInputScroll());
 
-        window.addEventListener('resize', () => this.updateScale());
-        setTimeout(() => this.updateScale(), 100);
+        // 🎯 FOCUS: User yozayotganda auto-refresh to'xtasin
+        this.inputCode.addEventListener('focus', () => {
+            console.log('📝 User typing - pausing auto-refresh');
+            this.disableAutoRefresh();
+        });
 
-        // Start preview auto-update every 3 seconds
+        // 🎯 BLUR: User yozib bo'lgach auto-refresh boshlansin
+        this.inputCode.addEventListener('blur', () => {
+            console.log('✏️ User finished typing - resuming auto-refresh');
+            // Faqat editor da kod bo'lsa va typing yo'q bo'lsa
+            if (this.inputCode.value.trim() && !this.isTyping) {
+                this.enableAutoRefresh();
+                this.runTypingCycle();
+            }
+        });
+
+        window.addEventListener('resize', () => this.updateScale());
+        // 🎯 Default scale - container'ga moslash
+        setTimeout(() => {
+            console.log('🎯 Initializing preview scale...');
+            this.updateScale();
+            // Default scale = 1 (100%) - user slider bilan o'zgartirishi mumkin
+            if (this.previewScaleSlider) {
+                this.previewScaleSlider.value = 0;
+                this.updatePreviewScale(0);
+            }
+            console.log('✅ Preview scale initialized');
+        }, 300);
+
+        // 🔄 LIVE PREVIEW: Har 2 sekundda preview yangilanadi
         this.startPreviewInterval();
 
         // User scroll detection for output code display
@@ -356,13 +471,26 @@ class LiveCodingApp {
         // Initialize keyboard shortcuts
         this.initKeyboardShortcuts();
 
-        // Check for auto-replay (URL or localStorage) - wait for splash screen to finish
+        // 🌐 Tab visibility change - pause/resume
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.pauseTyping();
+            } else {
+                this.resumeTyping();
+            }
+        });
+
+        // 🌐 Window blur/focus - pause/resume
+        window.addEventListener('blur', () => this.pauseTyping());
+        window.addEventListener('focus', () => this.resumeTyping());
+
+        // Check for auto-replay (URL only) - wait for splash screen to finish
         setTimeout(() => {
             this.checkForAutoReplay();
         }, 2500);
     }
 
-    // Check for auto-replay: URL room OR localStorage saved code
+    // Check for auto-replay: URL room only (NO localStorage)
     async checkForAutoReplay() {
         const hash = window.location.hash;
 
@@ -376,26 +504,11 @@ class LiveCodingApp {
             }
         }
 
-        // 2. Check localStorage for saved code (auto-replay on refresh)
-        const savedCode = localStorage.getItem('liveCoding_savedCode');
-        if (savedCode && savedCode.trim()) {
-            console.log('🎬 Auto-replay from localStorage');
+        // 2. ⚠️ NO localStorage - skip localStorage replay
+        const currentInput = this.inputCode.value.trim();
 
-            // 🔄 RESET: Clear previous output
-            this.resetOutputOnly();
-
-            this.inputCode.value = savedCode;
-            this.currentShareId = localStorage.getItem('liveCoding_lastRoomId');
-            this.updateInputLineNumbers();
-            this.highlightInput();
-            this.parseInputCode();
-
-            // Small delay to ensure UI is ready
-            await this.sleep(200);
-
-            // Auto-start typing animation
-            await this.startAutoPlay();
-        }
+        // ⚠️ NO auto-refresh on init - user input yozib bo'lgachgina
+        console.log('⏳ Waiting for user input...');
     }
 
     // Initialize keyboard shortcuts
@@ -426,21 +539,25 @@ class LiveCodingApp {
                 }
             }
 
-            // Ctrl/Cmd + S - Save code
-            if (isCtrl && e.key === 's') {
+            // Alt + S - Save code
+            if ((e.altKey) && (e.code === 'KeyS' || e.key === 's' || e.key === 'S')) {
                 e.preventDefault();
-                console.log('Shortcut: Ctrl+S - Save code');
+                e.stopPropagation();
+                console.log('🔥 Shortcut: Alt+S - Save code');
                 this.saveCode();
+                return;
             }
 
-            // Ctrl/Cmd + C - Copy share link
-            if (isCtrl && e.key === 'c') {
-                // Only if not text is selected (let browser handle copy if text selected)
+            // Ctrl + C yoki Alt + C - Copy share link (ikkisi ham ishlaydi)
+            if (((isCtrl) || (e.altKey)) && (e.code === 'KeyC' || e.key === 'c' || e.key === 'C')) {
+                // Faqat hech qanday text tanlanmagan bo'lsa
                 const selection = window.getSelection().toString();
                 if (!selection && document.activeElement !== this.inputCode) {
                     e.preventDefault();
-                    console.log('Shortcut: Ctrl+C - Copy share link');
+                    e.stopPropagation();
+                    console.log('🔥 Shortcut: Ctrl/Alt+C - Copy share link');
                     this.copyShareLink();
+                    return;
                 }
             }
 
@@ -455,7 +572,7 @@ class LiveCodingApp {
         });
     }
 
-    // Save code to Firebase + localStorage (Ctrl+S)
+    // Save code to Firebase only - FAqat 1 marta saqlash mumkin
     async saveCode() {
         console.log('SaveCode started...');
         const code = this.inputCode.value;
@@ -464,31 +581,53 @@ class LiveCodingApp {
             return;
         }
 
-        // 1. Save to localStorage
-        localStorage.setItem('liveCoding_savedCode', code);
-        localStorage.setItem('liveCoding_savedTime', new Date().toLocaleString());
-        localStorage.setItem('liveCoding_savedTitle', this.parsedData.title || 'Untitled');
-        console.log('Saved to localStorage');
+        // 🔄 Agar hozirda saqlanayotgan bo'lsa yoki allaqachon saqlangan bo'lsa
+        if (this.isSaving) {
+            console.log('⏳ Already saving, please wait...');
+            this.showToast('⏳ Saving in progress...', 'info');
+            return;
+        }
 
-        // 2. Save to Firebase
-        console.log('Saving to Firebase...');
-        const roomId = await this.saveToFirebase();
+        // 🔄 Agar bu project allaqachon saqlangan bo'lsa (hash bor)
+        const hash = window.location.hash;
+        if (hash && hash.length > 1 && this.currentShareId) {
+            console.log('🔄 Project already saved:', this.currentShareId.substring(0, 10));
+            this.showToast(`✅ Already saved! Press Alt+C to copy link`, 'info');
+            return;
+        }
 
-        if (roomId) {
-            // Save roomId to localStorage for auto-replay
-            localStorage.setItem('liveCoding_lastRoomId', roomId);
-            // Update URL with hash format
-            window.location.hash = roomId;
-            const shortRoomId = roomId.substring(0, 10) + '...';
-            this.showToast(`Saved to Room #${shortRoomId}!`, 'success');
-            console.log('✅ Code saved to Room:', roomId.substring(0, 20) + '...');
-        } else {
-            this.showToast('Saved to browser only', 'success');
-            console.log('⚠️ Code saved to localStorage only (Firebase failed)');
+        this.isSaving = true;
+
+        // Parse code to get title
+        this.parseInputCode();
+        const title = this.parsedData?.title || 'Untitled';
+
+        try {
+            // Save to Firebase only
+            console.log('Saving to Firebase...');
+            const roomId = await this.saveToFirebase();
+
+            // 🛡️ NULL CHECK: roomId tekshirish
+            if (roomId && typeof roomId === 'string') {
+                // Update URL with hash format
+                window.location.hash = roomId;
+                const shortRoomId = roomId.substring(0, 10) + '...';
+                // 📝 Project nomi bilan ko'rsatish
+                this.showToast(`✅ "${title}" saved to Room #${shortRoomId}`, 'success');
+                console.log('✅ Code saved to Room:', roomId.substring(0, 20) + '...');
+            } else {
+                this.showToast('Save failed!', 'error');
+                console.log('❌ Failed to save');
+            }
+        } catch (e) {
+            console.error('Save error:', e);
+            this.showToast('Save failed: ' + e.message, 'error');
+        } finally {
+            this.isSaving = false;
         }
     }
 
-    // Copy share link to clipboard (Ctrl+C)
+    // Copy share link to clipboard (Alt+C)
     async copyShareLink() {
         console.log('copyShareLink called, currentShareId:', this.currentShareId);
 
@@ -501,8 +640,9 @@ class LiveCodingApp {
             }
         }
 
-        if (!this.currentShareId) {
-            this.showToast('No room yet! Press Ctrl+S first', 'error');
+        // 🛡️ NULL CHECK: currentShareId string ekanligini tekshirish
+        if (!this.currentShareId || typeof this.currentShareId !== 'string') {
+            this.showToast('❌ No room yet! Press Alt+S to save first', 'error');
             return;
         }
 
@@ -513,9 +653,10 @@ class LiveCodingApp {
 
         if (copied) {
             const shortId = this.currentShareId.substring(0, 10) + '...';
-            this.showToast(`Room #${shortId} link copied!`, 'success');
+            // 📋 Link ni notification da ko'rsatish
+            this.showToast(`🔗 Copied: ${shareUrl}`, 'success');
         } else {
-            this.showToast(`Room link: ${shareUrl}`, 'info');
+            this.showToast(`🔗 Copy failed: ${shareUrl}`, 'error');
         }
 
         console.log('✅ Room URL copied:', shareUrl);
@@ -524,9 +665,14 @@ class LiveCodingApp {
     // Toggle comment for selected lines
     toggleComment() {
         const textarea = this.inputCode;
+        if (!textarea) return;
+
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
         const value = textarea.value;
+
+        // 🛡️ NULL CHECK: value mavjudligini tekshirish
+        if (!value || typeof value !== 'string') return;
 
         // Find line start and end
         let lineStart = value.lastIndexOf('\n', start - 1) + 1;
@@ -536,22 +682,30 @@ class LiveCodingApp {
         const selectedText = value.substring(lineStart, lineEnd);
         const lines = selectedText.split('\n');
 
-        // Check if all lines are commented
-        const allCommented = lines.every(line => line.trim().startsWith('<!--') && line.trim().endsWith('-->'));
+        // 🛡️ NULL CHECK: lines array tekshirish va startsWith xavfsiz chaqirish
+        const allCommented = lines.every(line => {
+            if (!line || typeof line !== 'string') return false;
+            const trimmed = line.trim();
+            return trimmed && trimmed.startsWith && trimmed.startsWith('<!--') && trimmed.endsWith('-->');
+        });
 
         let newText;
         if (allCommented) {
             // Uncomment
             newText = lines.map(line => {
+                if (!line || typeof line !== 'string') return line;
                 const trimmed = line.trim();
-                if (trimmed.startsWith('<!--') && trimmed.endsWith('-->')) {
+                if (trimmed && trimmed.startsWith && trimmed.startsWith('<!--') && trimmed.endsWith('-->')) {
                     return line.replace('<!--', '').replace('-->', '');
                 }
                 return line;
             }).join('\n');
         } else {
             // Comment
-            newText = lines.map(line => '<!--' + line + '-->').join('\n');
+            newText = lines.map(line => {
+                if (!line || typeof line !== 'string') return line;
+                return '<!--' + line + '-->';
+            }).join('\n');
         }
 
         textarea.value = value.substring(0, lineStart) + newText + value.substring(lineEnd);
@@ -771,10 +925,10 @@ class LiveCodingApp {
     }
 
     // Calculate typing speed based on slider value (0-100)
-    // 0% = 100ms (10 chars/sec), 100% = 4ms (250 chars/sec)
+    // 0% = 100ms (10 chars/sec), 100% = 10ms (100 chars/sec) - OPTIMIZED for browser
     calculateTypingSpeed(val) {
-        // 100ms dan 4ms gacha lineyn pasayish
-        return 100 - (val * 0.96);
+        // 100ms dan 10ms gacha lineyn pasayish (max 100 char/sec)
+        return 100 - (val * 0.90);
     }
 
     // Calculate chars per second from ms delay
@@ -799,10 +953,16 @@ class LiveCodingApp {
 
     // Parse input code and extract title, style, body
     parseInputCode() {
+        // 🛡️ NULL CHECK: inputCode mavjudligini tekshirish
+        if (!this.inputCode || !this.inputCode.value) {
+            this.parsedData = { title: '', style: '', body: '', hasErrors: false, errors: [] };
+            return this.parsedData;
+        }
+
         const html = this.inputCode.value.trim();
         if (!html) {
             this.parsedData = { title: '', style: '', body: '', hasErrors: false, errors: [] };
-            return;
+            return this.parsedData;
         }
 
         // Validate HTML structure
@@ -810,25 +970,39 @@ class LiveCodingApp {
 
         // Extract title content
         let title = '';
-        const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-        if (titleMatch) {
-            title = titleMatch[1].trim();
+        try {
+            const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+            if (titleMatch && titleMatch[1]) {
+                title = titleMatch[1].trim();
+            }
+        } catch (e) {
+            console.warn('Error parsing title:', e);
         }
 
         // Extract style content (between <style> and </style>)
         let style = '';
-        const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
-        let styleMatch;
-        while ((styleMatch = styleRegex.exec(html)) !== null) {
-            style += styleMatch[1].trim();
-            if (!styleMatch[1].trim().endsWith('\n')) style += '\n';
+        try {
+            const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+            let styleMatch;
+            while ((styleMatch = styleRegex.exec(html)) !== null) {
+                if (styleMatch[1]) {
+                    style += styleMatch[1].trim();
+                    if (!styleMatch[1].trim().endsWith('\n')) style += '\n';
+                }
+            }
+        } catch (e) {
+            console.warn('Error parsing style:', e);
         }
 
         // Extract body content (between <body> and </body>)
         let body = '';
-        const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-        if (bodyMatch) {
-            body = bodyMatch[1].trim();
+        try {
+            const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+            if (bodyMatch && bodyMatch[1]) {
+                body = bodyMatch[1].trim();
+            }
+        } catch (e) {
+            console.warn('Error parsing body:', e);
         }
 
         this.parsedData = {
@@ -845,42 +1019,74 @@ class LiveCodingApp {
         return this.parsedData;
     }
 
-    // Start auto-update preview every 3 seconds
+    // 🔄 Start preview - har 2 sekundda oddiy yangilanish
     startPreviewInterval() {
         if (this.previewInterval) {
             clearInterval(this.previewInterval);
         }
+
+        this.lastPreviewContent = '';
+
+        // Har 2 sekundda oddiy yangilanish (fade emas)
         this.previewInterval = setInterval(() => {
-            if (!this.isTyping && this.parsedData) {
-                this.updatePreviewFromParsed();
+            if (this.typedContent &&
+                this.typedContent.length >= 10 &&
+                this.typedContent !== this.lastPreviewContent) {
+
+                this.lastPreviewContent = this.typedContent;
+                this.updatePreviewSimple(); // Oddiy update (tiq-tiq)
             }
-        }, 3000);
+        }, 2000);
+        console.log('🔄 Preview: simple update every 2 seconds');
     }
 
-    // Update preview from parsed data
-    updatePreviewFromParsed() {
-        if (!this.parsedData || (!this.parsedData.body && !this.parsedData.style)) return;
+    // ⏸️ PAUSE: Tab/window dan chiqqanda typing ni to'xtatish
+    pauseTyping() {
+        if (this.isTyping && !this.isPaused) {
+            this.wasTypingBeforeBlur = true;
+            this.isPaused = true;
+            console.log('⏸️ Tab switched - typing paused');
+        }
+    }
 
-        const html = this.buildHTML(this.parsedData);
-        try {
-            this.preview.srcdoc = html;
-        } catch (e) {}
+    // ▶️ RESUME: Tab/window ga qaytib kelganda typing ni davom ettirish
+    resumeTyping() {
+        if (this.wasTypingBeforeBlur) {
+            this.isPaused = false;
+            this.wasTypingBeforeBlur = false;
+            console.log('▶️ Tab back - typing resumed');
+        }
+    }
+
+    // ⚠️ ESKI: parsedData dan emas, typedContent dan yangilaymiz
+    updatePreviewFromParsed() {
+        // Endi ishlatilmaydi - updatePreview() ishlatiladi
+        return;
     }
 
     // Build complete HTML from parsed parts
     buildHTML(data) {
+        // 🛡️ NULL CHECK: data obyektini tekshirish
+        if (!data || typeof data !== 'object') {
+            data = {};
+        }
+
+        const title = data.title || 'Document';
+        const style = data.style || '';
+        const body = data.body || '';
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${data.title}</title>
+    <title>${title}</title>
     <style>
-${data.style}
+${style}
     </style>
 </head>
 <body>
-${data.body}
+${body}
 </body>
 </html>`;
     }
@@ -927,70 +1133,92 @@ ${data.body}
     validateHTML(html) {
         const errors = [];
 
-        // Only show warnings, don't block execution
-        // Check for basic structure (warnings only)
-        if (!html.includes('<!DOCTYPE')) {
-            errors.push('WARNING: Missing <!DOCTYPE html>');
-        }
-        if (!html.includes('<html')) {
-            errors.push('WARNING: Missing <html> tag');
-        }
-        if (!html.includes('</html>')) {
-            errors.push('WARNING: Missing </html> closing tag');
-        }
-        if (!html.includes('<head>')) {
-            errors.push('WARNING: Missing <head> tag');
-        }
-        if (!html.includes('</head>')) {
-            errors.push('WARNING: Missing </head> closing tag');
-        }
-        if (!html.includes('<body>')) {
-            errors.push('WARNING: Missing <body> tag');
-        }
-        if (!html.includes('</body>')) {
-            errors.push('WARNING: Missing </body> closing tag');
-        }
-        if (!html.includes('<title>')) {
-            errors.push('WARNING: Missing <title> tag');
-        }
-        if (!html.includes('</title>')) {
-            errors.push('WARNING: Missing </title> closing tag');
+        // 🛡️ NULL CHECK: html string ekanligini tekshirish
+        if (!html || typeof html !== 'string') {
+            return errors;
         }
 
-        // Check for style tag issues
-        if (html.includes('<style>') && !html.includes('</style>')) {
-            errors.push('ERROR: Missing </style> closing tag');
+        try {
+            // Only show warnings, don't block execution
+            // Check for basic structure (warnings only)
+            if (!html.includes('<!DOCTYPE')) {
+                errors.push('WARNING: Missing <!DOCTYPE html>');
+            }
+            if (!html.includes('<html')) {
+                errors.push('WARNING: Missing <html> tag');
+            }
+            if (!html.includes('</html>')) {
+                errors.push('WARNING: Missing </html> closing tag');
+            }
+            if (!html.includes('<head>')) {
+                errors.push('WARNING: Missing <head> tag');
+            }
+            if (!html.includes('</head>')) {
+                errors.push('WARNING: Missing </head> closing tag');
+            }
+            if (!html.includes('<body>')) {
+                errors.push('WARNING: Missing <body> tag');
+            }
+            if (!html.includes('</body>')) {
+                errors.push('WARNING: Missing </body> closing tag');
+            }
+            if (!html.includes('<title>')) {
+                errors.push('WARNING: Missing <title> tag');
+            }
+            if (!html.includes('</title>')) {
+                errors.push('WARNING: Missing </title> closing tag');
+            }
+
+            // Check for style tag issues
+            if (html.includes('<style>') && !html.includes('</style>')) {
+                errors.push('ERROR: Missing </style> closing tag');
+            }
+        } catch (e) {
+            console.warn('Error validating HTML:', e);
         }
 
         return errors;
     }
 
     showErrors(errors) {
-        // Separate actual errors from warnings
-        const actualErrors = errors.filter(e => e.includes('ERROR:'));
-        const warnings = errors.filter(e => e.includes('WARNING:'));
+        // 🛡️ NULL CHECK: errorDisplay mavjudligini tekshirish
+        if (!this.errorDisplay) return false;
 
-        if (actualErrors.length > 0) {
-            this.errorDisplay.innerHTML = '<strong>ERRORS FOUND:</strong><br>' + actualErrors.map(e => '&#8226; ' + e).join('<br>');
-            this.errorDisplay.classList.remove('hidden');
-            this.errorDisplay.style.background = '#3d1f1f';
-            this.errorDisplay.style.color = '#f48771';
-        } else if (warnings.length > 0) {
-            this.errorDisplay.innerHTML = '<strong>⚠ WARNINGS:</strong><br>' + warnings.map(e => '&#8226; ' + e.replace('WARNING: ', '')).join('<br>');
-            this.errorDisplay.classList.remove('hidden');
-            this.errorDisplay.style.background = '#3d3d1f';
-            this.errorDisplay.style.color = '#f4e771';
-        } else if (this.inputCode.value.trim()) {
-            this.errorDisplay.innerHTML = '<strong>✓ VALID HTML</strong> - Ready to generate';
-            this.errorDisplay.classList.remove('hidden');
-            this.errorDisplay.style.background = '#1f3d1f';
-            this.errorDisplay.style.color = '#71f487';
-        } else {
-            this.errorDisplay.classList.add('hidden');
+        // 🛡️ NULL CHECK: errors array tekshirish
+        if (!Array.isArray(errors)) {
+            errors = [];
         }
 
-        // Return true only if there are actual blocking errors
-        return actualErrors.length > 0;
+        try {
+            // Separate actual errors from warnings
+            const actualErrors = errors.filter(e => e && typeof e === 'string' && e.includes('ERROR:'));
+            const warnings = errors.filter(e => e && typeof e === 'string' && e.includes('WARNING:'));
+
+            if (actualErrors.length > 0) {
+                this.errorDisplay.innerHTML = '<strong>ERRORS FOUND:</strong><br>' + actualErrors.map(e => '&#8226; ' + e).join('<br>');
+                this.errorDisplay.classList.remove('hidden');
+                this.errorDisplay.style.background = '#3d1f1f';
+                this.errorDisplay.style.color = '#f48771';
+            } else if (warnings.length > 0) {
+                this.errorDisplay.innerHTML = '<strong>⚠ WARNINGS:</strong><br>' + warnings.map(e => '&#8226; ' + (e ? e.replace('WARNING: ', '') : '')).join('<br>');
+                this.errorDisplay.classList.remove('hidden');
+                this.errorDisplay.style.background = '#3d3d1f';
+                this.errorDisplay.style.color = '#f4e771';
+            } else if (this.inputCode && this.inputCode.value && this.inputCode.value.trim()) {
+                this.errorDisplay.innerHTML = '<strong>✓ VALID HTML</strong> - Ready to generate';
+                this.errorDisplay.classList.remove('hidden');
+                this.errorDisplay.style.background = '#1f3d1f';
+                this.errorDisplay.style.color = '#71f487';
+            } else {
+                this.errorDisplay.classList.add('hidden');
+            }
+
+            // Return true only if there are actual blocking errors
+            return actualErrors.length > 0;
+        } catch (e) {
+            console.error('Error in showErrors:', e);
+            return false;
+        }
     }
 
     initPreviewDrag() {
@@ -1034,19 +1262,68 @@ ${data.body}
     }
 
     updatePreviewScale(value) {
-        if (!this.preview) return;
+        if (!this.preview || !this.previewContainer) return;
+
+        // Default scale - container'ga moslash
+        const containerWidth = this.previewContainer.clientWidth;
+        const containerHeight = this.previewContainer.clientHeight;
+
+        // 1920x1080 base scale (fit to container)
+        const baseScaleX = containerWidth / 1920;
+        const baseScaleY = containerHeight / 1080;
+        const baseScale = Math.min(baseScaleX, baseScaleY);
+        const minBaseScale = Math.max(baseScale, 0.3);
+
+        // Zoom from slider (0-100% -> 1x-3x)
         const zoomLevel = 1 + (value / 100) * 2;
-        this.preview.style.transform = `scale(${zoomLevel})`;
+        const finalScale = minBaseScale * zoomLevel;
+
+        this.preview.style.transform = `scale(${finalScale})`;
+        this.preview.style.width = '1920px';
+        this.preview.style.height = '1080px';
+
+        // preview-scaler ham moslashishi kerak
+        if (this.previewScaler) {
+            this.previewScaler.style.width = `${1920 * finalScale}px`;
+            this.previewScaler.style.height = `${1080 * finalScale}px`;
+        }
     }
 
     updateScale() {
-        if (!this.previewContainer || !this.preview) return;
+        if (!this.previewContainer || !this.preview) {
+            console.warn('⚠️ Preview elements not found for scaling');
+            return;
+        }
+
+        // Container o'lchamlarini olish
         const containerWidth = this.previewContainer.clientWidth;
         const containerHeight = this.previewContainer.clientHeight;
+
+        console.log(`📐 Container: ${containerWidth}x${containerHeight}`);
+
+        // 1920x1080 content'ga mos scale (fit to container)
         const scaleX = containerWidth / 1920;
         const scaleY = containerHeight / 1080;
         const scale = Math.min(scaleX, scaleY);
-        this.preview.style.transform = `scale(${scale})`;
+
+        // Minimum scale chegarasi
+        const finalScale = Math.max(scale, 0.3);
+
+        console.log(`🔍 Scale calculated: ${finalScale}`);
+
+        // Default scale (zoom slider = 0)
+        this.preview.style.transform = `scale(${finalScale})`;
+        this.preview.style.width = '1920px';
+        this.preview.style.height = '1080px';
+
+        // preview-scaler ham moslashishi kerak
+        if (this.previewScaler) {
+            this.previewScaler.style.width = `${1920 * finalScale}px`;
+            this.previewScaler.style.height = `${1080 * finalScale}px`;
+            console.log(`📏 Scaler size: ${1920 * finalScale}x${1080 * finalScale}`);
+        }
+
+        return finalScale;
     }
 
     analyzeCode(html) {
@@ -1055,11 +1332,14 @@ ${data.body}
             this.parseInputCode();
         }
 
+        // 🛡️ NULL CHECK: parsedData obyektini tekshirish
+        const parsedData = this.parsedData || {};
+
         const diagnostics = {
-            valid: !this.parsedData.hasErrors,
-            title: this.parsedData.title || 'Document',
-            body: this.parsedData.body || '',
-            style: this.parsedData.style || '',
+            valid: !parsedData.hasErrors,
+            title: parsedData.title || 'Document',
+            body: parsedData.body || '',
+            style: parsedData.style || '',
             totalChars: 0
         };
 
@@ -1102,9 +1382,15 @@ ${data.body}
         } else {
             // Check if parsed data has errors
             this.parseInputCode();
-            console.log('After parseInputCode, hasErrors:', this.parsedData.hasErrors);
+
+            // 🛡️ NULL CHECK: parsedData tekshirish
+            const parsedData = this.parsedData || {};
+            const errors = parsedData.errors || [];
+
+            console.log('After parseInputCode, hasErrors:', parsedData.hasErrors);
+
             // Check for actual blocking errors (not just warnings)
-            const hasBlockingErrors = this.parsedData.errors.some(e => e.includes('ERROR:'));
+            const hasBlockingErrors = errors.some(e => e && typeof e === 'string' && e.includes('ERROR:'));
             if (hasBlockingErrors) {
                 // Show errors but don't start
                 console.log('Blocking errors found, not starting');
@@ -1121,7 +1407,9 @@ ${data.body}
         this.isTyping = false;
         this.typedContent = '';
         this.typedCode.innerHTML = '';
-        this.preview.srcdoc = '';
+        // ⚡ NO FLASH: Iframe ni tozalamaslik - eski content qolaveradi
+        // Yangi typing boshlanganda o'zi yangilanadi
+        // this.preview.srcdoc = ''; // BU FLASH BERADI!
         this.currentChars = 0;
         this.totalChars = 0;
         this.progressValue.textContent = '0/0 chars (0.0%)';
@@ -1129,8 +1417,7 @@ ${data.body}
         // Input highlighting is updated
         this.updateInputLineNumbers();
         this.highlightInput();
-        // Restart preview interval
-        this.startPreviewInterval();
+        // ⚠️ NO preview interval - prevents white flash
         // Focus the textarea so user can immediately start editing
         this.inputCode.focus();
     }
@@ -1146,9 +1433,10 @@ ${data.body}
         if (this.typedCode) {
             this.typedCode.innerHTML = '';
         }
-        if (this.preview) {
-            this.preview.srcdoc = '';
-        }
+        // ⚡ NO FLASH: Iframe ni tozalamaslik
+        // if (this.preview) {
+        //     this.preview.srcdoc = ''; // BU FLASH BERADI!
+        // }
         if (this.outputLineNumbers) {
             this.outputLineNumbers.textContent = '1';
         }
@@ -1197,8 +1485,15 @@ ${data.body}
         console.log('startTyping called');
 
         if (this.isTyping) {
-            console.log('Already typing, resetting...');
-            this.reset();
+            console.log('Already typing, stopping first...');
+            // 🛑 NO WHITEFLASH: Iframe tozalamasdan faqat typedContent ni
+            this.isTyping = false;
+            this.isPaused = false;
+            this.typedContent = '';
+            if (this.typedCode) this.typedCode.innerHTML = '';
+            // ⚠️ this.preview.srcdoc = ''; - BU WHITEFLASH BERADI!
+            this.currentChars = 0;
+            this.totalChars = 0;
             await this.sleep(100);
         }
 
@@ -1230,11 +1525,9 @@ ${data.body}
         this.resetScrollDetection(); // Reset scroll detection
         this.typedContent = '';
         this.typedCode.innerHTML = '';
+        // ⚡ NO WHITEFLASH: Don't clear preview iframe, let it show old content until new is ready
 
-        // Stop auto-preview while typing
-        if (this.previewInterval) {
-            clearInterval(this.previewInterval);
-        }
+        // 🔄 LIVE: Auto-preview to'xtatilmaydi - har 2 sekundda yangilanadi
 
         this.totalChars = diagnostics.totalChars || 100;
         this.currentChars = 0;
@@ -1257,6 +1550,13 @@ ${data.body}
 
     async realTyping(data) {
         console.log('realTyping started with data:', data);
+
+        // 🛡️ NULL CHECK: data obyektini tekshirish
+        if (!data || typeof data !== 'object') {
+            console.error('Invalid data passed to realTyping');
+            return;
+        }
+
         const title = data.title || 'Document';
         const bodyContent = data.body || '';
         const styleContent = data.style || '';
@@ -1283,51 +1583,159 @@ ${data.body}
         // FIRST: Type body content if exists
         if (bodyContent) {
             console.log('Typing body content...');
-            await this.scrollToTag('body');
-            await this.sleep(300);
+            if (this.typingSpeed !== 0) {
+                await this.scrollToTag('body');
+                await this.sleep(300);
+            }
             await this.typeIntoTag('body', bodyContent);
         }
 
         // SECOND: Type style content if exists
         if (styleContent) {
             console.log('Typing style content...');
-            await this.scrollToTag('style');
-            await this.sleep(300);
+            if (this.typingSpeed !== 0) {
+                await this.scrollToTag('style');
+                await this.sleep(300);
+            }
             await this.typeIntoTag('style', styleContent);
         }
 
-        await this.sleep(200);
+        // ⚡ INSTANT MODE: Update preview only once at the end
+        console.log('⚡ Updating preview once at the end...');
         this.updateTypedCodeDisplay();
+        this.updateOutputLineNumbers();
+        this.updateProgressBar();
+        this.autoScroll();
         this.updatePreview();
+        console.log('✅ Typing complete!');
 
+        // 🔄 Typing tugadi - oxirgi content ni saqlash
+        this.lastPreviewContent = this.typedContent;
+        console.log('✅ Typing complete!');
+    }
+
+    // 🔄 Auto-refresh - Har 1 sekundda (typing tezligidan qat'iy nazar)
+    startAutoRefresh() {
+        // Agar oldingi interval bo'lsa, tozalash
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+        }
+
+        console.log('⏱️ Auto-refresh: EXACTLY every 1 second');
+
+        // 🔄 Typing tugagachgina yangi cycle (white flash oldini olish uchun)
+        this.runTypingCycle();
+    }
+
+    // 🔄 Typing cycle - typing tugagachgina yangi cycle
+    async runTypingCycle() {
+        console.log('⏱️ Starting typing cycle...');
+
+        // 1. Avvalgi typing ni to'xtatish
+        this.isTyping = false;
+        this.isPaused = false;
+
+        // 2. ⚡ NO WHITEFLASH: Reset faqat typedContent (iframe emas!)
+        this.typedContent = '';
+        this.currentChars = 0;
+        this.totalChars = 0;
+        if (this.typedCode) {
+            this.typedCode.innerHTML = '';
+        }
+        if (this.outputLineNumbers) {
+            this.outputLineNumbers.textContent = '1';
+        }
+
+        // 3. Parse current input (editor dan)
+        this.parseInputCode();
+
+        // 4. Default speed (NO localStorage) - MAX 100 char/sec
+        const speedValue = 70;
+        this.typingSpeed = this.calculateTypingSpeed(speedValue);
+
+        // 5. Typing ni boshlash (iframe avvalgi holatda qoladi)
+        console.log('🚀 Starting typing...');
+        await this.startTyping();
+
+        // 6. ⏱️ Typing tugagach kutish, keyin yangi cycle
+        console.log('✅ Cycle complete, waiting 1 second...');
+        await this.sleep(1000);
+
+        // 7. Yangi cycle (agar auto-refresh hali yoqilmagan bo'lsa)
+        if (this.autoRefreshEnabled) {
+            this.runTypingCycle();
+        }
+    }
+
+    // 🔄 Enable auto-refresh
+    enableAutoRefresh() {
+        this.autoRefreshEnabled = true;
+    }
+
+    // 🔄 Disable auto-refresh
+    disableAutoRefresh() {
+        this.autoRefreshEnabled = false;
+        // 🛑 Joriy typing ni to'xtatish (agar ishlayotgan bo'lsa)
+        this.isTyping = false;
+        console.log('⏸️ Auto-refresh disabled');
+    }
+
+    // 🔄 Replay typing animation - ONLY SHOW/PREVIEW (not editor)
+    async replayTypingAnimation() {
+        console.log('🔄 Resetting SHOW/PREVIEW only...');
+
+        // 1. Clear previous interval
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+            this.autoRefreshInterval = null;
+        }
+
+        // 2. Stop current typing
+        this.isTyping = false;
+        this.isPaused = false;
+
+        // 3. ⚡ NO WHITEFLASH: Faqat typedContent ni reset qilish (iframe emas!)
+        this.typedContent = '';
+        if (this.typedCode) this.typedCode.innerHTML = '';
+        if (this.outputLineNumbers) this.outputLineNumbers.textContent = '1';
+        this.currentChars = 0;
+        this.totalChars = 0;
+        this.userScrolled = false;
+
+        // ⚠️ Editor/Input NI reset QILMAYMIZ - shunchaki parse qilamiz
+        this.parseInputCode();
+
+        // 4. Wait for reset
+        await this.sleep(50);
+
+        // 5. Default speed (NO localStorage)
+        const speedValue = 70;
+        this.typingSpeed = this.calculateTypingSpeed(speedValue);
+        this.speedSlider.value = speedValue;
+        this.updateSpeedDisplay(speedValue);
+        console.log('🎛️ Speed:', speedValue + '%');
+
+        // 6. Enable auto-refresh and start cycle
+        console.log('🚀 Starting show/preview replay...');
+        this.enableAutoRefresh();
+        this.runTypingCycle();
     }
 
     // Type a line with natural cursor movement
     async typeLineWithCursor(text) {
-        console.log('typeLineWithCursor called, text length:', text.length, 'isTyping:', this.isTyping, 'speed:', this.typingSpeed);
-
-        // INSTANT MODE: If speed is 0, type everything at once
-        if (this.typingSpeed === 0) {
-            console.log('⚡ INSTANT MODE: Typing all at once');
-            for (const char of text) {
-                if (!this.isTyping) return;
-                this.typedContent += char;
-                if (!/\s/.test(char)) {
-                    this.currentChars++;
-                }
-            }
-            this.typedContent += '\n';
-            this.updateTypedCodeDisplay();
-            this.updateOutputLineNumbers();
-            this.autoScroll();
-            this.updatePreview();
-            this.updateProgressBar();
-            console.log('⚡ INSTANT MODE: Line complete');
+        // 🛡️ NULL CHECK: text mavjudligini tekshirish
+        if (!text || typeof text !== 'string') {
+            console.log('Invalid text passed to typeLineWithCursor');
             return;
         }
 
-        // NORMAL MODE: Character by character with delay
-        for (const char of text) {
+        console.log('typeLineWithCursor called, text length:', text.length, 'isTyping:', this.isTyping, 'speed:', this.typingSpeed);
+
+        // CHARACTER BY CHARACTER: Always type character by character
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const prevChar = i > 0 ? text[i - 1] : '';
+
             // Wait if paused
             while (this.isPaused) {
                 await this.sleep(100);
@@ -1346,8 +1754,12 @@ ${data.body}
             this.updateProgressBar();
             this.autoScroll();
 
-            // Update preview on EVERY character (live preview)
-            this.updatePreview();
+            // 🎨 UPDATE: Hech qanday fade yo'q, faqat oddiy update
+            // HTML va CSS da hamma narsa tiq-tiq paydo bo'ladi
+            if (char === '>' || char === '}') {
+                // Tag yoki CSS rule tugadi - oddiy update
+                this.updatePreviewSimple();
+            }
 
             // Normal mode with delay (4ms minimum)
             const variation = Math.random() * 20 - 10;
@@ -1357,7 +1769,9 @@ ${data.body}
         this.updateTypedCodeDisplay();
         this.updateOutputLineNumbers();
         this.autoScroll();
-        this.updatePreview();
+
+        // Line tugaganda oddiy yangilanish
+        this.updatePreviewSimple();
         console.log('Line complete, typedContent length:', this.typedContent.length);
     }
 
@@ -1371,6 +1785,8 @@ ${data.body}
             console.log('typedCode element not found!');
             return;
         }
+
+        // Always use Prism highlighting for nice visuals
         if (window.Prism && Prism.languages && Prism.languages.html) {
             // Use Prism.highlight to generate highlighted HTML
             const highlighted = Prism.highlight(this.typedContent, Prism.languages.html, 'html');
@@ -1381,14 +1797,23 @@ ${data.body}
     }
 
     async typeIntoTag(tagName, content) {
+        // 🛡️ NULL CHECK: tagName va content tekshirish
+        if (!tagName || typeof tagName !== 'string') return;
+        if (!content || typeof content !== 'string') return;
+
         const openTag = `<${tagName}>`;
         const closeTag = `</${tagName}>`;
 
         if (!content.trim()) return;
 
+        // 🛡️ NULL CHECK: typedContent mavjudligini tekshirish
+        if (!this.typedContent || typeof this.typedContent !== 'string') {
+            this.typedContent = '';
+        }
+
         // Prepare content with proper indentation
         let formattedContent = '';
-        const lines = content.split('\n').filter(line => line.trim());
+        const lines = content.split('\n').filter(line => line && line.trim());
 
         if (tagName === 'style') {
             for (const line of lines) {
@@ -1400,38 +1825,17 @@ ${data.body}
             }
         }
 
-        // INSTANT MODE: If speed is 0, insert all at once
-        if (this.typingSpeed === 0) {
-            console.log(`⚡ INSTANT MODE: Inserting ${tagName} content at once`);
-
-            // Find the closing tag position
-            let currentCloseIndex = this.typedContent.indexOf(closeTag);
-            if (currentCloseIndex === -1) return;
-
-            // Count non-whitespace chars for progress
-            const nonWsChars = (formattedContent.match(/[^\s]/g) || []).length;
-            this.currentChars += nonWsChars;
-
-            // Insert all content before closing tag
-            this.typedContent = this.typedContent.substring(0, currentCloseIndex) +
-                              formattedContent +
-                              this.typedContent.substring(currentCloseIndex);
-
-            this.updateTypedCodeDisplay();
-            this.updateOutputLineNumbers();
-            this.updateProgressBar();
-            this.autoScroll();
-            this.updatePreview();
-            return;
-        }
-
-        // NORMAL MODE: Type content line by line
+        // CHARACTER BY CHARACTER: Always type content character by character
+        // for visual animation effect
         const contentLines = formattedContent.split('\n');
         for (let i = 0; i < contentLines.length; i++) {
             const line = contentLines[i];
             if (!line && i === 0) continue; // Skip empty first line
 
-            for (const char of line) {
+            for (let j = 0; j < line.length; j++) {
+                const char = line[j];
+                const prevChar = j > 0 ? line[j - 1] : '';
+
                 while (this.isPaused) await this.sleep(100);
                 if (!this.isTyping) return;
 
@@ -1451,8 +1855,11 @@ ${data.body}
                 this.updateProgressBar();
                 this.autoScroll();
 
-                // Update preview on EVERY character (live preview)
-                this.updatePreview();
+                // 🎨 UPDATE: Hech qanday fade yo'q
+                if (char === '>' || char === '}') {
+                    // Tag yoki CSS rule tugadi - oddiy update
+                    this.updatePreviewSimple();
+                }
 
                 // Natural typing variation (4ms minimum)
                 const variation = Math.random() * 15 - 7;
@@ -1474,7 +1881,9 @@ ${data.body}
             this.autoScroll();
         }
 
-        this.updatePreview();
+        // Tag ichidagi content tugagach oddiy yangilanish
+        this.updatePreviewSimple();
+        console.log(`${tagName} content complete, preview updated`);
     }
 
     updateCodeDisplay() {
@@ -1518,15 +1927,70 @@ ${data.body}
         this.progressValue.textContent = this.formatProgress(this.currentChars, this.totalChars);
     }
 
-    updatePreview() {
-        if (this.isTyping && this.typedContent) {
-            // Update during typing
-            try {
+    // 🎨 SHOW: Oddiy update - typing paytida hech qanday fade yo'q
+    updatePreviewSimple() {
+        if (!this.typedContent || this.typedContent.length < 10) {
+            return;
+        }
+        try {
+            if (this.preview) {
+                // Oddiy srcdoc yangilash - hech qanday fade effektsiz
                 this.preview.srcdoc = this.typedContent;
-            } catch (e) {}
-        } else if (!this.isTyping && this.parsedData) {
-            // Use parsed data when not typing
-            this.updatePreviewFromParsed();
+            }
+        } catch (e) {
+            console.error('Simple update error:', e);
+        }
+    }
+
+    // 🎨 SHOW: Smooth update - har 2 sekundda (crossfade bilan)
+    updatePreviewSmooth() {
+        // 🔄 Typing davomida ham smooth yangilanish
+        if (this.previewUpdating || !this.typedContent || this.typedContent.length < 10) {
+            return;
+        }
+
+        this.previewUpdating = true;
+
+        // SHOW ni crossfade effekti bilan yangilash
+        try {
+            if (this.preview) {
+                // 1️⃣ FADE OUT (0.2s) - tezroq
+                this.preview.style.transition = 'opacity 0.2s ease-in-out';
+                this.preview.style.opacity = '0.3';
+
+                // 2️⃣ Yangi content yuklash
+                setTimeout(() => {
+                    if (this.preview) {
+                        this.preview.srcdoc = this.typedContent;
+
+                        // 3️⃣ FADE IN (0.2s) - tezroq
+                        requestAnimationFrame(() => {
+                            if (this.preview) {
+                                this.preview.style.opacity = '1';
+                            }
+                            this.previewUpdating = false;
+                        });
+                    } else {
+                        this.previewUpdating = false;
+                    }
+                }, 200); // 0.2s kutish
+            } else {
+                this.previewUpdating = false;
+            }
+        } catch (e) {
+            console.error('Smooth update error:', e);
+            this.previewUpdating = false;
+        }
+    }
+
+    // 🔄 Asosiy chaqiriv
+    updatePreview(smooth = false) {
+        if (smooth) {
+            // Smooth har doim ishlaydi (typing davomida ham)
+            this.updatePreviewSmooth();
+        } else {
+            // Oddiy update
+            this.updatePreviewSimple();
         }
     }
 
@@ -1536,7 +2000,8 @@ ${data.body}
         this.userScrolled = false;
         this.typedContent = '';
         this.typedCode.innerHTML = '';
-        this.preview.srcdoc = '';
+        // ⚡ NO FLASH: Iframe ni tozalamaslik
+        // this.preview.srcdoc = ''; // BU FLASH BERADI!
         this.inputCode.value = '';
         this.parsedData = { title: '', style: '', body: '', hasErrors: false, errors: [] };
         this.updateInputLineNumbers();
@@ -1566,4 +2031,33 @@ ${data.body}
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => new LiveCodingApp());
+// 🛡️ GLOBAL ERROR HANDLER: Tashqi xatoliklarni ushlash
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        new LiveCodingApp();
+    } catch (e) {
+        console.error('Failed to initialize LiveCodingApp:', e);
+    }
+});
+
+// 🛡️ WINDOW ERROR HANDLER: Kutilmagan xatoliklarni ushlash
+window.addEventListener('error', (e) => {
+    console.error('Global error caught:', e.message, 'at', e.filename, ':', e.lineno);
+    // Xatoni o'z ichiga olgan bo'lsa, uni qayta ishga tushurmaslik
+    if (e.message && e.message.includes('startsWith')) {
+        console.warn('Ignoring startsWith error - likely from external library');
+        e.preventDefault();
+    }
+});
+
+// 🛡️ UNHANDLED PROMISE REJECTION HANDLER
+window.addEventListener('unhandledrejection', (e) => {
+    console.error('Unhandled promise rejection:', e.reason);
+    // Firebase yoki boshqa kutubxonalardan kelgan xatoliklarni ushlash
+    if (e.reason && typeof e.reason.message === 'string') {
+        if (e.reason.message.includes('startsWith') || e.reason.message.includes('undefined')) {
+            console.warn('Ignoring external library rejection');
+            e.preventDefault();
+        }
+    }
+});
