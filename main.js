@@ -1,12 +1,12 @@
 // Firebase imports
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { getDatabase, ref, set, get, child, runTransaction } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';
+import { getDatabase, ref, set, get, child } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';
 
 // Firebase configuration
 const firebaseConfig = {
     apiKey: "AIzaSyD3WNuR8LcsjgHo_No1zuIxPbiT9X6Mvd0",
     authDomain: "codestream-b01d8.firebaseapp.com",
-    databaseURL: "https://codestream-b01d8-default-rtdb.firebaseio.com",
+    databaseURL: "https://codestream-b01d8-default-rtdb.europe-west1.firebasedatabase.app",
     projectId: "codestream-b01d8",
     storageBucket: "codestream-b01d8.firebasestorage.app",
     messagingSenderId: "175692262236",
@@ -72,15 +72,36 @@ class LiveCodingApp {
     // Get next room ID (auto-increment: 1, 2, 3...)
     async getNextRoomId() {
         try {
+            console.log('Getting next room ID...');
             const counterRef = ref(database, 'counters/roomCounter');
-            const result = await runTransaction(counterRef, (currentValue) => {
-                return (currentValue || 0) + 1;
-            });
-            return result.snapshot.val();
+
+            // Get current value
+            const snapshot = await get(counterRef);
+            let currentValue = 0;
+
+            if (snapshot.exists()) {
+                currentValue = snapshot.val();
+                console.log('Current counter value:', currentValue);
+            } else {
+                console.log('Counter does not exist, starting from 0');
+            }
+
+            const newValue = currentValue + 1;
+            console.log('New room ID will be:', newValue);
+
+            // Set new value
+            await set(counterRef, newValue);
+            console.log('Counter updated to:', newValue);
+
+            return newValue;
         } catch (error) {
-            console.error('Error getting next room ID:', error);
-            // Fallback to random ID if transaction fails
-            return Math.floor(Math.random() * 1000000);
+            console.error('❌ Error getting next room ID:', error);
+            console.error('Error code:', error.code);
+            console.error('Error message:', error.message);
+            // Fallback to timestamp-based ID
+            const fallbackId = Date.now();
+            console.log('Using fallback ID:', fallbackId);
+            return fallbackId;
         }
     }
 
@@ -173,31 +194,37 @@ class LiveCodingApp {
 
     // Save code to Firebase with auto-increment room ID
     async saveToFirebase() {
+        console.log('saveToFirebase started...');
         const code = this.inputCode.value;
         if (!code.trim()) {
             this.showToast('No code to save!', 'error');
             return null;
         }
 
-        // Get next room number (1, 2, 3...)
-        const roomId = await this.getNextRoomId();
-
-        const data = {
-            code: code,
-            title: this.parsedData.title || 'Untitled',
-            timestamp: Date.now(),
-            createdAt: new Date().toISOString(),
-            roomId: roomId
-        };
-
         try {
+            // Get next room number (1, 2, 3...)
+            console.log('Getting room ID...');
+            const roomId = await this.getNextRoomId();
+            console.log('Got room ID:', roomId);
+
+            const data = {
+                code: code,
+                title: this.parsedData.title || 'Untitled',
+                timestamp: Date.now(),
+                createdAt: new Date().toISOString(),
+                roomId: roomId
+            };
+
+            console.log('Saving to Firebase path:', `codes/${roomId}`);
             await set(ref(database, `codes/${roomId}`), data);
             this.currentShareId = roomId;
-            console.log('Code saved to Firebase Room:', roomId);
+            console.log('✅ Code saved to Firebase Room:', roomId);
             return roomId;
         } catch (error) {
-            console.error('Error saving to Firebase:', error);
-            this.showToast('Failed to save to cloud', 'error');
+            console.error('❌ Error saving to Firebase:', error);
+            console.error('Error code:', error.code);
+            console.error('Error message:', error.message);
+            this.showToast('Cloud save failed: ' + error.message, 'error');
             return null;
         }
     }
@@ -268,8 +295,10 @@ class LiveCodingApp {
         // Initialize keyboard shortcuts
         this.initKeyboardShortcuts();
 
-        // Check URL for shared code
-        this.checkUrlForSharedCode();
+        // Check URL for shared code after a short delay
+        setTimeout(() => {
+            this.checkUrlForSharedCode();
+        }, 500);
     }
 
     // Initialize keyboard shortcuts
@@ -331,6 +360,7 @@ class LiveCodingApp {
 
     // Save code to Firebase + localStorage (Ctrl+S)
     async saveCode() {
+        console.log('SaveCode started...');
         const code = this.inputCode.value;
         if (!code.trim()) {
             this.showToast('No code to save!', 'error');
@@ -341,38 +371,53 @@ class LiveCodingApp {
         localStorage.setItem('liveCoding_savedCode', code);
         localStorage.setItem('liveCoding_savedTime', new Date().toLocaleString());
         localStorage.setItem('liveCoding_savedTitle', this.parsedData.title || 'Untitled');
+        console.log('Saved to localStorage');
 
         // 2. Save to Firebase
+        console.log('Saving to Firebase...');
         const roomId = await this.saveToFirebase();
 
         if (roomId) {
             // Update URL with hash format: #1, #2, #3...
             window.location.hash = roomId;
             this.showToast(`Saved to Room #${roomId}!`, 'success');
-            console.log('Code saved to Room:', roomId);
+            console.log('✅ Code saved to Room:', roomId);
         } else {
-            this.showToast('Code saved! (Browser only)', 'success');
-            console.log('Code saved to localStorage only');
+            this.showToast('Saved to browser only', 'success');
+            console.log('⚠️ Code saved to localStorage only (Firebase failed)');
         }
     }
 
     // Copy share link to clipboard (Ctrl+C)
     async copyShareLink() {
+        console.log('copyShareLink called, currentShareId:', this.currentShareId);
+
+        // Check URL hash if no currentShareId
+        if (!this.currentShareId) {
+            const hash = window.location.hash;
+            if (hash && hash.length > 1) {
+                this.currentShareId = hash.substring(1);
+                console.log('Got room ID from URL:', this.currentShareId);
+            }
+        }
+
         if (!this.currentShareId) {
             this.showToast('No room yet! Press Ctrl+S first', 'error');
             return;
         }
 
         const shareUrl = `${window.location.origin}${window.location.pathname}#${this.currentShareId}`;
+        console.log('Share URL:', shareUrl);
+
         const copied = await this.copyToClipboard(shareUrl);
 
         if (copied) {
-            this.showToast('Room link copied!', 'success');
+            this.showToast(`Room #${this.currentShareId} link copied!`, 'success');
         } else {
             this.showToast(`Room link: ${shareUrl}`, 'info');
         }
 
-        console.log('Room URL copied:', shareUrl);
+        console.log('✅ Room URL copied:', shareUrl);
     }
 
     // Toggle comment for selected lines
