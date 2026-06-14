@@ -51,6 +51,8 @@ class LiveCodingApp {
         this.currentShareId = null;
         // Auto-refresh flag
         this.autoRefreshEnabled = false;
+        // Smart auto-scroll
+        this.scrollTimeout = null;
         this.init();
     }
 
@@ -463,6 +465,21 @@ class LiveCodingApp {
             this.codeDisplay.addEventListener('scroll', () => {
                 this.handleUserScroll();
             });
+
+            // Space to toggle auto-scroll when viewing preview code
+            this.codeDisplay.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    this.userScrolled = !this.userScrolled;
+                    if (!this.userScrolled) {
+                        this.autoScroll();
+                    }
+                    console.log('[Scroll] Auto-scroll:', this.userScrolled ? 'PAUSED' : 'ACTIVE');
+                }
+            });
+
+            // Make code display focusable
+            this.codeDisplay.setAttribute('tabindex', '0');
         }
 
         // Initialize resizer for panels
@@ -917,23 +934,30 @@ class LiveCodingApp {
         });
     }
 
-    // Handle user scroll - check if user is at bottom or not
+    // Handle user scroll - smart auto-scroll detection
     handleUserScroll() {
+        if (!this.codeDisplay) return;
+
+        // Wait a bit to see if this is user-initiated or auto-scroll
+        clearTimeout(this.scrollTimeout);
+        this.scrollTimeout = setTimeout(() => {
+            this.checkScrollPosition();
+        }, 50);
+    }
+
+    checkScrollPosition() {
         if (!this.codeDisplay) return;
 
         const scrollTop = this.codeDisplay.scrollTop;
         const scrollHeight = this.codeDisplay.scrollHeight;
         const clientHeight = this.codeDisplay.clientHeight;
 
-        // Check if user is at bottom (within 50px of bottom)
-        const isAtBottom = scrollTop + clientHeight >= scrollHeight - 50;
-
-        if (isAtBottom) {
-            // User scrolled to bottom - re-enable auto-scroll
-            this.userScrolled = false;
-        } else {
-            // User scrolled away from bottom - disable auto-scroll
+        // Faqat pastdan 100px uzoqlashsa user scroll deb hisoblash
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        if (distanceFromBottom > 100) {
             this.userScrolled = true;
+        } else {
+            this.userScrolled = false;
         }
     }
 
@@ -1298,9 +1322,6 @@ ${body}
         this.preview.style.width  = RENDER_W + 'px';
         this.preview.style.height = RENDER_H + 'px';
 
-        const scaledH = RENDER_H * scale;
-        this.previewContainer.style.height = scaledH + 'px';
-
         // Update slider label to show current simulated width
         const vpLabel = document.getElementById('viewport-label');
         if (vpLabel) vpLabel.textContent = RENDER_W + 'px';
@@ -1329,10 +1350,6 @@ ${body}
         // iframe itself renders at full RENDER_W — real browser behavior
         this.preview.style.width  = RENDER_W + 'px';
         this.preview.style.height = RENDER_H + 'px';
-
-        // Make preview-container tall enough to show scaled content
-        const scaledH = RENDER_H * scale;
-        this.previewContainer.style.height = scaledH + 'px';
 
         return scale;
     }
@@ -1913,12 +1930,10 @@ ${body}
     }
 
     autoScroll() {
-        if (this.codeDisplay && !this.userScrolled) {
-            this.codeDisplay.scrollTo({
-                top: this.codeDisplay.scrollHeight,
-                behavior: 'smooth'
-            });
-        }
+        if (!this.codeDisplay || this.userScrolled) return;
+
+        // Eng oddiy va ishonchli: doim pastga scroll
+        this.codeDisplay.scrollTop = this.codeDisplay.scrollHeight;
     }
 
     updateProgressBar() {
