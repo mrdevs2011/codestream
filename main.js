@@ -69,37 +69,49 @@ class LiveCodingApp {
         }, 2000); // Show for 2 seconds to see logo animation
     }
 
-    // Get next room ID (auto-increment: 1, 2, 3...)
-    async getNextRoomId() {
+    // Generate unique room ID: a3a4eqfasr3qrqw34u398ruasdfuhor732q8y3287q49
+    generateUniqueId(length = 50) {
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let result = '';
+        for (let i = 0; i < length; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    // Get unique room ID and check if exists in Firebase
+    async getUniqueRoomId() {
         try {
-            console.log('Getting next room ID...');
-            const counterRef = ref(database, 'counters/roomCounter');
+            console.log('Generating unique room ID...');
+            let roomId;
+            let attempts = 0;
+            const maxAttempts = 10;
 
-            // Get current value
-            const snapshot = await get(counterRef);
-            let currentValue = 0;
+            do {
+                roomId = this.generateUniqueId(50); // 50 ta belgi
+                attempts++;
 
-            if (snapshot.exists()) {
-                currentValue = snapshot.val();
-                console.log('Current counter value:', currentValue);
-            } else {
-                console.log('Counter does not exist, starting from 0');
-            }
+                // Check if this ID already exists
+                const dbRef = ref(database);
+                const snapshot = await get(child(dbRef, `codes/${roomId}`));
 
-            const newValue = currentValue + 1;
-            console.log('New room ID will be:', newValue);
+                if (!snapshot.exists()) {
+                    // ID is unique, use it
+                    console.log('✅ Generated unique room ID:', roomId.substring(0, 20) + '...');
+                    return roomId;
+                }
 
-            // Set new value
-            await set(counterRef, newValue);
-            console.log('Counter updated to:', newValue);
+                console.log(`⚠️ ID collision, retrying... (${attempts}/${maxAttempts})`);
+            } while (attempts < maxAttempts);
 
-            return newValue;
+            // Fallback if all attempts failed
+            const fallbackId = this.generateUniqueId(50) + Date.now();
+            console.log('Using fallback ID');
+            return fallbackId;
         } catch (error) {
-            console.error('❌ Error getting next room ID:', error);
-            console.error('Error code:', error.code);
-            console.error('Error message:', error.message);
-            // Fallback to timestamp-based ID
-            const fallbackId = Date.now();
+            console.error('❌ Error generating room ID:', error);
+            // Fallback to timestamp + random
+            const fallbackId = Date.now().toString(36) + Math.random().toString(36).substring(2);
             console.log('Using fallback ID:', fallbackId);
             return fallbackId;
         }
@@ -187,14 +199,17 @@ class LiveCodingApp {
                 this.updateInputLineNumbers();
                 this.highlightInput();
                 this.parseInputCode();
-                this.showToast(`Loaded Room #${codeId} (${data.title || 'Untitled'})`, 'success');
-                console.log('Code loaded from Room:', codeId);
+
+                const shortCodeId = codeId.substring(0, 10) + '...';
+                this.showToast(`Loaded Room #${shortCodeId} (${data.title || 'Untitled'})`, 'success');
+                console.log('Code loaded from Room:', codeId.substring(0, 20) + '...');
 
                 // 🎬 AUTO PLAY MODE: URL orqali kirgan foydalanuvchilar uchun
                 console.log('🎬 Starting auto-play mode...');
                 this.startAutoPlay();
             } else {
-                this.showToast(`Room #${codeId} not found!`, 'error');
+                const shortCodeId = codeId.substring(0, 10) + '...';
+                this.showToast(`Room #${shortCodeId} not found!`, 'error');
             }
         } catch (error) {
             console.error('Error loading from Firebase:', error);
@@ -240,10 +255,10 @@ class LiveCodingApp {
         }
 
         try {
-            // Get next room number (1, 2, 3...)
-            console.log('Getting room ID...');
-            const roomId = await this.getNextRoomId();
-            console.log('Got room ID:', roomId);
+            // Generate unique room ID
+            console.log('Getting unique room ID...');
+            const roomId = await this.getUniqueRoomId();
+            console.log('Got room ID:', roomId.substring(0, 20) + '...');
 
             const data = {
                 code: code,
@@ -343,11 +358,11 @@ class LiveCodingApp {
     async checkForAutoReplay() {
         const hash = window.location.hash;
 
-        // 1. Check URL hash first (Room #1, #2, etc.)
+        // 1. Check URL hash first (any room ID format)
         if (hash && hash.length > 1) {
             const roomId = hash.substring(1);
-            if (!isNaN(roomId) && roomId.length > 0) {
-                console.log('🎬 Auto-replay from URL Room:', roomId);
+            if (roomId.length >= 10) { // Minimum length for unique ID
+                console.log('🎬 Auto-replay from URL Room:', roomId.substring(0, 20) + '...');
                 await this.loadFromFirebase(roomId);
                 return;
             }
@@ -447,10 +462,11 @@ class LiveCodingApp {
         if (roomId) {
             // Save roomId to localStorage for auto-replay
             localStorage.setItem('liveCoding_lastRoomId', roomId);
-            // Update URL with hash format: #1, #2, #3...
+            // Update URL with hash format
             window.location.hash = roomId;
-            this.showToast(`Saved to Room #${roomId}!`, 'success');
-            console.log('✅ Code saved to Room:', roomId);
+            const shortRoomId = roomId.substring(0, 10) + '...';
+            this.showToast(`Saved to Room #${shortRoomId}!`, 'success');
+            console.log('✅ Code saved to Room:', roomId.substring(0, 20) + '...');
         } else {
             this.showToast('Saved to browser only', 'success');
             console.log('⚠️ Code saved to localStorage only (Firebase failed)');
@@ -481,7 +497,8 @@ class LiveCodingApp {
         const copied = await this.copyToClipboard(shareUrl);
 
         if (copied) {
-            this.showToast(`Room #${this.currentShareId} link copied!`, 'success');
+            const shortId = this.currentShareId.substring(0, 10) + '...';
+            this.showToast(`Room #${shortId} link copied!`, 'success');
         } else {
             this.showToast(`Room link: ${shareUrl}`, 'info');
         }
