@@ -178,6 +178,12 @@ class LiveCodingApp {
                 const data = snapshot.val();
                 this.inputCode.value = data.code;
                 this.currentShareId = codeId;
+
+                // Save to localStorage for auto-replay on refresh
+                localStorage.setItem('liveCoding_savedCode', data.code);
+                localStorage.setItem('liveCoding_savedTitle', data.title || 'Untitled');
+                localStorage.setItem('liveCoding_lastRoomId', codeId);
+
                 this.updateInputLineNumbers();
                 this.highlightInput();
                 this.parseInputCode();
@@ -327,10 +333,39 @@ class LiveCodingApp {
         // Initialize keyboard shortcuts
         this.initKeyboardShortcuts();
 
-        // Check URL for shared code after a short delay
+        // Check for auto-replay (URL or localStorage)
         setTimeout(() => {
-            this.checkUrlForSharedCode();
-        }, 500);
+            this.checkForAutoReplay();
+        }, 800);
+    }
+
+    // Check for auto-replay: URL room OR localStorage saved code
+    async checkForAutoReplay() {
+        const hash = window.location.hash;
+
+        // 1. Check URL hash first (Room #1, #2, etc.)
+        if (hash && hash.length > 1) {
+            const roomId = hash.substring(1);
+            if (!isNaN(roomId) && roomId.length > 0) {
+                console.log('🎬 Auto-replay from URL Room:', roomId);
+                await this.loadFromFirebase(roomId);
+                return;
+            }
+        }
+
+        // 2. Check localStorage for saved code (auto-replay on refresh)
+        const savedCode = localStorage.getItem('liveCoding_savedCode');
+        if (savedCode && savedCode.trim()) {
+            console.log('🎬 Auto-replay from localStorage');
+            this.inputCode.value = savedCode;
+            this.currentShareId = localStorage.getItem('liveCoding_lastRoomId');
+            this.updateInputLineNumbers();
+            this.highlightInput();
+            this.parseInputCode();
+
+            // Auto-start typing animation
+            await this.startAutoPlay();
+        }
     }
 
     // Initialize keyboard shortcuts
@@ -410,6 +445,8 @@ class LiveCodingApp {
         const roomId = await this.saveToFirebase();
 
         if (roomId) {
+            // Save roomId to localStorage for auto-replay
+            localStorage.setItem('liveCoding_lastRoomId', roomId);
             // Update URL with hash format: #1, #2, #3...
             window.location.hash = roomId;
             this.showToast(`Saved to Room #${roomId}!`, 'success');
