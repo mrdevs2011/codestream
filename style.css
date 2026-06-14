@@ -498,10 +498,10 @@ button:hover {
 }
 
 .code-display-wrapper {
-    height: 40%;
+    flex: 0 0 40%;
     display: flex;
     overflow: hidden;
-    flex-shrink: 0;
+    min-height: 0;
 }
 
 .code-display {
@@ -571,12 +571,12 @@ button:hover {
 
 /* Preview */
 .preview-container {
-    height: calc(60% - 2px);
+    flex: 1 1 0;
+    min-height: 0;
     background: #ffffff;
     overflow: hidden;
     position: relative;
     display: block;
-    flex-shrink: 0;
 }
 
 .preview-scaler {

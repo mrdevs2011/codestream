@@ -960,15 +960,16 @@ class LiveCodingApp {
                 return;
             }
 
-            const currentCodePercent = parseFloat(this.codeDisplayWrapper.style.height) || 40;
+            const currentFlex = this.codeDisplayWrapper.style.flexBasis;
+            const currentCodePercent = parseFloat(currentFlex) || 40;
             const diff = targetCodePercent - currentCodePercent;
 
             // Smooth easing
             const speed = 0.15;
             const newPercent = currentCodePercent + diff * speed;
 
-            this.codeDisplayWrapper.style.height = newPercent + '%';
-            this.previewContainer.style.height = (100 - newPercent) + '%';
+            this.codeDisplayWrapper.style.flex = `0 0 ${newPercent}%`;
+            this.previewContainer.style.flex = '1 1 0';
 
             this.updateScale();
 
@@ -1221,8 +1222,9 @@ class LiveCodingApp {
         }
 
         const title = data.title || 'Document';
-        const style = data.style || '';
-        const body = data.body || '';
+        // Bo'sh style va body - keyin alohida qo'shiladi
+        const style = '';
+        const body = '';
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -1231,18 +1233,6 @@ class LiveCodingApp {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>${title}</title>
     <style>
-        /* Responsive base styles */
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow-x: hidden;
-        }
-        img, video, canvas, iframe {
-            max-width: 100%;
-            height: auto;
-        }
 ${style}
     </style>
 </head>
@@ -1885,7 +1875,9 @@ ${body}
             }
 
             this.typedContent += char;
-            this.updateTypedCodeDisplay(true);
+            // 🖱️ Cursor: oxirgi qo'shilgan belgidan keyin
+            const cursorIndex = this.typedContent.length - 1;
+            this.updateTypedCodeDisplay(true, cursorIndex);
             if (!/\s/.test(char)) {
                 this.currentChars++;
             }
@@ -1904,7 +1896,9 @@ ${body}
             await this.sleep(Math.max(4, this.typingSpeed + variation));
         }
         this.typedContent += '\n';
-        this.updateTypedCodeDisplay(true);
+        // 🖱️ Cursor: yangi qatordan oldingi oxirgi belgida
+        const cursorIndex = this.typedContent.length - 2;
+        this.updateTypedCodeDisplay(true, cursorIndex);
         this.updateOutputLineNumbers();
         this.autoScroll();
 
@@ -1913,7 +1907,7 @@ ${body}
         console.log('Line complete, typedContent length:', this.typedContent.length);
     }
 
-    updateTypedCodeDisplay(showCursor = false) {
+    updateTypedCodeDisplay(showCursor = false, cursorAfterIndex = -1) {
         if (!this.typedCode) {
             console.log('typedCode element not found!');
             return;
@@ -1921,17 +1915,38 @@ ${body}
 
         // Always use Prism highlighting for nice visuals
         if (window.Prism && Prism.languages && Prism.languages.html) {
-            // Highlight the entire content at once (correct highlighting)
-            const highlighted = Prism.highlight(this.typedContent, Prism.languages.html, 'html');
+            let contentToHighlight = this.typedContent;
 
-            // Add cursor at the end if typing is active
-            if (showCursor && this.isTyping) {
-                this.typedCode.innerHTML = highlighted + '<span class="typing-cursor"></span>';
+            // Agar cursor specific index dan keyin ko'rsatilishi kerak bo'lsa
+            if (showCursor && this.isTyping && cursorAfterIndex >= 0 && cursorAfterIndex < this.typedContent.length) {
+                // Content ni ikki qismga bo'lamiz: cursor gacha va cursor dan keyin
+                const beforeCursor = this.typedContent.substring(0, cursorAfterIndex + 1);
+                const afterCursor = this.typedContent.substring(cursorAfterIndex + 1);
+
+                // Har ikki qismini alohida highlight qilamiz
+                const highlightedBefore = Prism.highlight(beforeCursor, Prism.languages.html, 'html');
+                const highlightedAfter = Prism.highlight(afterCursor, Prism.languages.html, 'html');
+
+                // Cursor ni orasiga qo'yamiz
+                this.typedCode.innerHTML = highlightedBefore + '<span class="typing-cursor"></span>' + highlightedAfter;
             } else {
-                this.typedCode.innerHTML = highlighted;
+                // Oddiy holat - cursor oxirida
+                const highlighted = Prism.highlight(contentToHighlight, Prism.languages.html, 'html');
+                if (showCursor && this.isTyping) {
+                    this.typedCode.innerHTML = highlighted + '<span class="typing-cursor"></span>';
+                } else {
+                    this.typedCode.innerHTML = highlighted;
+                }
             }
         } else {
-            this.typedCode.textContent = this.typedContent;
+            if (showCursor && this.isTyping && cursorAfterIndex >= 0 && cursorAfterIndex < this.typedContent.length) {
+                // Plain text mode - cursor ni orasiga qo'yish
+                const before = this.typedContent.substring(0, cursorAfterIndex + 1);
+                const after = this.typedContent.substring(cursorAfterIndex + 1);
+                this.typedCode.innerHTML = before + '<span class="typing-cursor"></span>' + after;
+            } else {
+                this.typedCode.textContent = this.typedContent;
+            }
         }
     }
 
@@ -1956,8 +1971,6 @@ ${body}
         const openTag = `<${tagName}>`;
         const closeTag = `</${tagName}>`;
 
-        if (!content.trim()) return;
-
         // 🛡️ NULL CHECK: typedContent mavjudligini tekshirish
         if (!this.typedContent || typeof this.typedContent !== 'string') {
             this.typedContent = '';
@@ -1965,13 +1978,16 @@ ${body}
 
         // Prepare content with proper indentation
         let formattedContent = '';
-        const lines = content.split('\n').filter(line => line && line.trim());
 
+        let lines = [];
         if (tagName === 'style') {
+            // Style content 2 bo'sh joy indent bilan
+            lines = content.split('\n');
             for (const line of lines) {
-                formattedContent += '\n        ' + line.trim();
+                formattedContent += '\n  ' + line;
             }
         } else if (tagName === 'body') {
+            lines = content.split('\n').filter(line => line && line.trim());
             for (const line of lines) {
                 formattedContent += '\n    ' + line;
             }
@@ -1979,31 +1995,47 @@ ${body}
 
         console.log(`[DEBUG] typeIntoTag('${tagName}'): ${lines.length} lines, formatted length ${formattedContent.length}`);
 
-        // CHARACTER BY CHARACTER: Always type content character by character
-        // for visual animation effect
+        // 🎯 Yangi yechim: Har bir qatorni to'liq qo'shamiz, character-by-character emas
+        // Bu <tag> va content orasiga bo'sh joy kiritish muammosini yechadi
         const contentLines = formattedContent.split('\n');
+
+        // Bir marta insertPos ni hisoblaymiz (</tag> dan oldingi \n dan keyin)
+        let closeTagPos = this.typedContent.lastIndexOf(closeTag);
+        if (closeTagPos === -1) return;
+
+        let scanBack = closeTagPos - 1;
+        while (scanBack >= 0 && (this.typedContent[scanBack] === ' ' || this.typedContent[scanBack] === '\t')) {
+            scanBack--;
+        }
+        let baseInsertPos = closeTagPos; // Default: </tag> oldidan
+        if (scanBack >= 0 && this.typedContent[scanBack] === '\n') {
+            baseInsertPos = scanBack + 1; // \n dan keyin
+        }
+
         for (let i = 0; i < contentLines.length; i++) {
             const line = contentLines[i];
             if (!line && i === 0) continue; // Skip empty first line
 
+            // Har bir belgini ketma-ket qo'shamiz
             for (let j = 0; j < line.length; j++) {
                 const char = line[j];
-                const prevChar = j > 0 ? line[j - 1] : '';
 
                 while (this.isPaused) await this.sleep(100);
                 if (!this.isTyping) return;
 
-                // Find the closing tag position (it moves as we insert)
-                let currentCloseIndex = this.typedContent.indexOf(closeTag);
-                if (currentCloseIndex === -1) return;
+                // Hozirgi insertPos (base + avval qo'shilgan belgilar soni)
+                const currentInsertPos = baseInsertPos;
 
-                // Insert character before closing tag
-                this.typedContent = this.typedContent.substring(0, currentCloseIndex) +
+                // Insert character
+                this.typedContent = this.typedContent.substring(0, currentInsertPos) +
                                   char +
-                                  this.typedContent.substring(currentCloseIndex);
+                                  this.typedContent.substring(currentInsertPos);
 
-                // Cursor position is right after the inserted character
-                this.updateTypedCodeDisplay(true);
+                // Base insertPos ni oshiramiz (keyingi belgi uchun)
+                baseInsertPos++;
+
+                // 🖱️ Cursor: yangi qo'shilgan belgida
+                this.updateTypedCodeDisplay(true, currentInsertPos);
                 if (!/\s/.test(char)) {
                     this.currentChars++;
                 }
@@ -2012,7 +2044,6 @@ ${body}
 
                 // 🎨 UPDATE: Hech qanday fade yo'q
                 if (char === '>' || char === '}') {
-                    // Tag yoki CSS rule tugadi - oddiy update
                     this.updatePreviewSimple();
                 }
 
@@ -2021,15 +2052,16 @@ ${body}
                 await this.sleep(Math.max(4, this.typingSpeed + variation));
             }
 
-            // Add newline after each line except the last
-            let closeIdxForNewline = this.typedContent.indexOf(closeTag);
-            if (i < contentLines.length - 1 && closeIdxForNewline !== -1) {
-                this.typedContent = this.typedContent.substring(0, closeIdxForNewline) +
+            // Qator oxirida \n qo'shamiz (oxirgi qatordan tashqari)
+            if (i < contentLines.length - 1) {
+                const currentInsertPos = baseInsertPos;
+                this.typedContent = this.typedContent.substring(0, currentInsertPos) +
                                   '\n' +
-                                  this.typedContent.substring(closeIdxForNewline);
+                                  this.typedContent.substring(currentInsertPos);
+                baseInsertPos++;
             }
 
-            this.updateTypedCodeDisplay(true);
+            this.updateTypedCodeDisplay(true, baseInsertPos - 1);
             this.updateOutputLineNumbers();
             this.autoScroll();
         }
